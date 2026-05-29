@@ -1,0 +1,12 @@
+__pycache__/
+*.pyc
+*.pyo
+evidence/
+*.mp4
+*.jsonl
+*.db
+.env
+*.pt
+*.pth
+venv/
+.venv/
