@@ -216,7 +216,8 @@ class Alert:
         self.frame            = frame
         self.ts               = ts
         self.severity         = max((SEVERITY.get(d.label, "MEDIUM") for d in detections),
-                                    key=lambda s: ["LOW","MEDIUM","HIGH"].index(s))
+                                    key=lambda s: ["LOW","MEDIUM","HIGH"].index(s),
+                                    default="MEDIUM")
         self.cosmos_reasoning: Optional[str] = None  # filled in async
 
 
