@@ -658,7 +658,7 @@ async def roi_hover(req: HoverRequest):
 
 def _start_monitor(source, confidence):
     global _monitor
-    _monitor = RealtimeMonitor(source=source, confidence=confidence, cooldown_s=3.0, fps_cap=30)
+    _monitor = RealtimeMonitor(source=source, confidence=confidence, cooldown_s=8.0, fps_cap=30)
     _monitor.on_frame     = on_frame
     _monitor.on_alert     = on_alert
     _monitor.on_reasoning = on_reasoning

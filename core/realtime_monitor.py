@@ -132,57 +132,58 @@ STEP_PROMPT = (
 
 class SceneMemory:
     """
-    Tracks what has already been described so the VLM only narrates changes.
-    Resets when entity count changes significantly or enough time passes.
+    Tracks what has already been described so the VLM only narrates real changes.
+
+    Rules:
+    - First detection ever → full description
+    - Same labels as before → delta prompt (only describe changes)
+    - Label SET changes (person disappears, text/objects appear) → full description
+    - No time-based reset (avoids re-describing same unchanging scene)
+    - Repeat text filter (60% word overlap) → suppressed entirely
     """
-    FULL_RESET_AFTER = 60.0    # seconds — re-describe everything after 1 min
-    ENTITY_CHANGE_THRESHOLD = 1  # if person count changes by this, force full description
 
     def __init__(self):
-        self.known: str = ""          # last full description
-        self.known_count: int = 0     # last person/entity count
-        self.last_full_ts: float = 0.0
-        self.recent: list[str] = []   # last 5 descriptions for similarity check
+        self.known: str = ""                  # last spoken description
+        self.known_labels: frozenset = frozenset()  # label set from last description
+        self.recent: list[str] = []           # last 6 spoken descriptions
+
+    def _label_set(self, detections: list) -> frozenset:
+        return frozenset(d.label for d in detections)
 
     def should_full_describe(self, detections: list) -> bool:
-        """Return True if we should do a full description instead of delta."""
-        now = time.time()
-        people_count = sum(1 for d in detections if d.label == "person")
+        """Full description needed when: first time, OR label set changed."""
         if not self.known:
             return True
-        if now - self.last_full_ts > self.FULL_RESET_AFTER:
-            return True
-        if abs(people_count - self.known_count) >= self.ENTITY_CHANGE_THRESHOLD:
+        new_labels = self._label_set(detections)
+        # Scene changed if labels differ (person gone, text appeared, etc.)
+        if new_labels != self.known_labels:
             return True
         return False
 
     def update(self, description: str, detections: list) -> None:
-        """Record a new description into memory."""
-        if description == "SAME":
+        if description == "SAME" or not description:
             return
         self.known = description
-        self.known_count = sum(1 for d in detections if d.label == "person")
-        self.last_full_ts = time.time()
+        self.known_labels = self._label_set(detections)
         self.recent.append(description)
-        if len(self.recent) > 5:
+        if len(self.recent) > 6:
             self.recent.pop(0)
 
     def is_repeat(self, text: str) -> bool:
-        """True if this description is basically the same as a recent one."""
-        if text == "SAME" or not text:
+        """Suppress if >60% word overlap with any of the last 3 spoken descriptions."""
+        if not text or text.strip().upper() == "SAME":
             return True
-        text_words = set(text.lower().split())
+        words = set(text.lower().split())
         for prev in self.recent[-3:]:
             prev_words = set(prev.lower().split())
-            if not text_words or not prev_words:
+            if not words or not prev_words:
                 continue
-            overlap = len(text_words & prev_words) / max(len(text_words), len(prev_words))
-            if overlap > 0.75:
+            overlap = len(words & prev_words) / max(len(words), len(prev_words))
+            if overlap > 0.60:
                 return True
         return False
 
     def get_prompt(self, detections: list) -> str:
-        """Return the right prompt template based on scene state."""
         det_str = ", ".join(f"{d.label} ({d.confidence:.0%})" for d in detections)
         if self.should_full_describe(detections):
             return COSMOS_PROMPT_FIRST.format(detections=det_str)
@@ -508,6 +509,10 @@ class RealtimeMonitor:
         self._collector  = DataCollector(enabled=True)
         self._memory     = SceneMemory()
         self._running    = False
+        # Label stabilizer: label must appear in ≥3 of last 5 frames to count
+        self._label_window: list[frozenset] = []
+        self._WINDOW = 5
+        self._QUORUM = 3
         self._thread:  Optional[threading.Thread] = None
         self._last_alert_ts: float = 0.0
 
@@ -584,7 +589,7 @@ class RealtimeMonitor:
             detections, ms = self._detector.detect(detect_frame)
 
             # Remap detection boxes back to full-frame coordinates if ROI was used
-            if roi and roi_offset != (0,0):
+            if roi:
                 rw = roi[2]-roi[0]; rh = roi[3]-roi[1]
                 for d in detections:
                     bx1,by1,bx2,by2 = d.box
@@ -602,13 +607,33 @@ class RealtimeMonitor:
                 except Exception:
                     pass
 
+            # --- Stabilize label set across frames ---
+            frame_labels = frozenset(d.label for d in detections)
+            self._label_window.append(frame_labels)
+            if len(self._label_window) > self._WINDOW:
+                self._label_window.pop(0)
+            # Only labels seen in ≥ quorum frames count as stable
+            from collections import Counter as _Counter
+            counts = _Counter(lbl for fset in self._label_window for lbl in fset)
+            stable_labels = frozenset(lbl for lbl, n in counts.items() if n >= self._QUORUM)
+            stable_detections = [d for d in detections if d.label in stable_labels]
+
             # --- Check for alert-worthy detections ---
-            if detections:
+            if stable_detections:
                 now = time.time()
-                if now - self._last_alert_ts >= self.cooldown_s:
+                current_labels = stable_labels
+                scene_changed = (current_labels != self._memory.known_labels)
+
+                # Only fire VLM if: scene labels changed OR enough time passed since last alert
+                if scene_changed or (now - self._last_alert_ts >= self.cooldown_s and not self._memory.known_labels):
                     self._last_alert_ts = now
                     self.stats["alerts"] += 1
-                    alert = Alert(detections, frame.copy(), now)
+                    alert = Alert(stable_detections, frame.copy(), now)
+
+                    if scene_changed:
+                        log.info(f"[Monitor] Scene changed: {self._memory.known_labels} → {current_labels}")
+                        # Update label tracking immediately — don't wait for VLM
+                        self._memory.known_labels = current_labels
 
                     # Fire immediate alert
                     if self.on_alert:
@@ -617,11 +642,18 @@ class RealtimeMonitor:
                         except Exception as e:
                             log.warning(f"[Monitor] on_alert error: {e}")
 
-                    # Save frame + labels immediately (no reasoning yet)
+                    # Save frame + labels
                     self._collector.collect(alert, reasoning="")
 
-                    # Queue async Cosmos reasoning with scene memory
+                    # Queue VLM reasoning
                     self._reasoner.submit(alert, self._on_reasoning_done, self._memory)
+
+            elif self._memory.known_labels:
+                # Everything disappeared from frame — scene cleared
+                current_labels = frozenset()
+                if current_labels != self._memory.known_labels:
+                    log.info(f"[Monitor] Scene cleared — was: {self._memory.known_labels}")
+                    self._memory.known_labels = current_labels
 
             # --- Cap FPS ---
             elapsed = time.perf_counter() - t_start
