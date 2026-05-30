@@ -22,7 +22,8 @@ from typing import Optional
 
 log = logging.getLogger(__name__)
 
-COSMOS_URL = "http://10.0.0.1:8000/v1/chat/completions"
+STEP_URL   = "http://localhost:8898/v1/chat/completions"   # primary
+COSMOS_URL = "http://10.0.0.1:8000/v1/chat/completions"   # fallback
 
 # ── Bootstrap prompt ──────────────────────────────────────────────────────────
 BOOTSTRAP_PROMPT = """Look at this image carefully. Identify what kind of content this is.
@@ -167,7 +168,7 @@ class ContextSession:
             return DOMAIN_PROMPTS["general"]
 
 
-def bootstrap_from_frame(frame, vlm_url: str = COSMOS_URL) -> Optional[ContextSession]:
+def bootstrap_from_frame(frame, vlm_url: str = STEP_URL) -> Optional[ContextSession]:
     """
     Send a frame to the VLM to classify the scene and extract context.
     Returns a populated ContextSession or None on failure.
@@ -176,23 +177,29 @@ def bootstrap_from_frame(frame, vlm_url: str = COSMOS_URL) -> Optional[ContextSe
     _, jpg = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 70])
     b64 = base64.b64encode(jpg.tobytes()).decode()
 
-    payload = {
-        "model": "nvidia/cosmos-reason2-8b",
-        "messages": [{"role": "user", "content": [
+    def _call(url, model):
+        p = {"model": model, "messages": [{"role": "user", "content": [
             {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64}"}},
             {"type": "text", "text": BOOTSTRAP_PROMPT},
-        ]}],
-        "max_tokens": 300,
-        "temperature": 0.1,
-    }
-    try:
-        req = urllib.request.Request(
-            vlm_url,
-            data=json.dumps(payload).encode(),
-            headers={"Content-Type": "application/json", "Authorization": "Bearer local"},
-        )
+        ]}], "max_tokens": 300, "temperature": 0.1}
+        req = urllib.request.Request(url, data=json.dumps(p).encode(),
+            headers={"Content-Type": "application/json", "Authorization": "Bearer local"})
         with urllib.request.urlopen(req, timeout=30) as r:
-            text = json.loads(r.read())["choices"][0]["message"]["content"].strip()
+            msg = json.loads(r.read())["choices"][0]["message"]
+            return (msg.get("content") or msg.get("reasoning_content") or "").strip()
+
+    # Try Step first, fall back to Cosmos
+    text = ""
+    try:
+        text = _call(STEP_URL, "step-3.7-flash")
+    except Exception as e:
+        log.warning(f"[Bootstrap] Step failed ({e}), trying Cosmos")
+        try:
+            text = _call(COSMOS_URL, "nvidia/cosmos-reason2-8b")
+        except Exception as e2:
+            log.warning(f"[Bootstrap] Cosmos also failed: {e2}")
+            return None
+    try:
 
         # Strip markdown code fences if present
         text = text.strip().lstrip("```json").lstrip("```").rstrip("```").strip()

@@ -34,9 +34,9 @@ from ultralytics import YOLO
 
 log = logging.getLogger(__name__)
 
-OLLAMA_VLM_URL = "http://localhost:11434/v1/chat/completions"  # qwen3-vl (local, primary)
+STEP_URL       = "http://localhost:8898/v1/chat/completions"  # Step-3.7-Flash (primary — 198B MoE, vision enabled)
 COSMOS_URL     = "http://10.0.0.1:8000/v1/chat/completions"  # Cosmos on Spark1 (fallback)
-STEP_URL       = "http://localhost:8898/v1/chat/completions"  # Step-3.7-Flash (text-only, disabled)
+OLLAMA_VLM_URL = "http://localhost:11434/v1/chat/completions"  # qwen3-vl Ollama (offline)
 ELGATO_DEV  = 0  # /dev/video0 — pass as int, not string (OpenCV V4L2 backend)
 STREAM_URL  = "http://localhost:8891/stream"  # CheatVision MJPEG stream
 
@@ -365,9 +365,10 @@ class CosmosReasoner:
             prompt = COSMOS_PROMPT_FIRST.format(
                 detections=", ".join(f"{d.label} ({d.confidence:.0%})" for d in alert.detections)
             )
+        # Primary: Step-3.7-Flash (198B MoE, vision-enabled via mmproj)
         try:
             payload = {
-                "model":    "qwen3-vl:latest",
+                "model":    "step-3.7-flash",
                 "messages": [
                     {"role": "system", "content": "Reply in one sentence only. No preamble."},
                     {"role": "user", "content": [
@@ -375,28 +376,22 @@ class CosmosReasoner:
                         {"type": "text",      "text":      prompt},
                     ]},
                 ],
-                "max_tokens":  600,
-                "temperature": 0.1,
+                "max_tokens":  80,
+                "temperature": 0.2,
             }
             data = json.dumps(payload).encode()
             req  = urllib.request.Request(
-                OLLAMA_VLM_URL, data=data,
+                STEP_URL, data=data,
                 headers={"Content-Type": "application/json", "Authorization": "Bearer local"},
             )
-            with urllib.request.urlopen(req, timeout=30) as r:
+            with urllib.request.urlopen(req, timeout=25) as r:
                 msg  = json.loads(r.read())["choices"][0]["message"]
-                content = msg.get("content", "").strip()
-                if not content:
-                    # Thinking model: extract answer after </think> if present
-                    raw = msg.get("reasoning", "") or msg.get("reasoning_content", "")
-                    if "</think>" in raw:
-                        content = raw.split("</think>", 1)[1].strip()
-                    else:
-                        content = raw.strip()
-                log.info(f"[VLM] {content[:120]}")
-                return content
+                content = (msg.get("content") or msg.get("reasoning_content") or "").strip()
+                if content:
+                    log.info(f"[Step] {content[:120]}")
+                    return content
         except Exception as e:
-            log.warning(f"[VLM] Local failed ({e}), falling back to Cosmos on Spark1")
+            log.warning(f"[Step] Failed ({e}), falling back to Cosmos")
 
         # Fallback: Cosmos on Spark1
         payload = {
