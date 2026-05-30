@@ -108,18 +108,85 @@ SEVERITY = {
     "default":      "LOW",
 }
 
-COSMOS_PROMPT = (
+COSMOS_PROMPT_FIRST = (
     "Describe this image in one sentence for a blind person. "
-    "Detected objects: {detections}. "
-    "Name exactly what you see — people (clothing, position, action), objects, setting. "
-    "Be specific and concrete. No threat assessment. Max 20 words."
+    "Detected: {detections}. "
+    "Name people (clothing, position, action), objects, setting. Specific and concrete. Max 20 words."
+)
+
+COSMOS_PROMPT_UPDATE = (
+    "Scene context — already known: {context}\n"
+    "Detected now: {detections}\n"
+    "Describe ONLY what is NEW or CHANGED since the context above. "
+    "New person? Different action? Object appeared/moved? "
+    "If nothing meaningful changed, reply exactly: SAME\n"
+    "Otherwise one sentence, max 15 words."
 )
 
 STEP_PROMPT = (
     "Describe this scene in one sentence for a blind person. "
     "Name specific objects, people (appearance, clothing, action), and what is happening. "
-    "Be concrete and specific — no vague words like 'various' or 'several'. Max 20 words."
+    "Be concrete and specific. Max 20 words."
 )
+
+
+class SceneMemory:
+    """
+    Tracks what has already been described so the VLM only narrates changes.
+    Resets when entity count changes significantly or enough time passes.
+    """
+    FULL_RESET_AFTER = 60.0    # seconds — re-describe everything after 1 min
+    ENTITY_CHANGE_THRESHOLD = 1  # if person count changes by this, force full description
+
+    def __init__(self):
+        self.known: str = ""          # last full description
+        self.known_count: int = 0     # last person/entity count
+        self.last_full_ts: float = 0.0
+        self.recent: list[str] = []   # last 5 descriptions for similarity check
+
+    def should_full_describe(self, detections: list) -> bool:
+        """Return True if we should do a full description instead of delta."""
+        now = time.time()
+        people_count = sum(1 for d in detections if d.label == "person")
+        if not self.known:
+            return True
+        if now - self.last_full_ts > self.FULL_RESET_AFTER:
+            return True
+        if abs(people_count - self.known_count) >= self.ENTITY_CHANGE_THRESHOLD:
+            return True
+        return False
+
+    def update(self, description: str, detections: list) -> None:
+        """Record a new description into memory."""
+        if description == "SAME":
+            return
+        self.known = description
+        self.known_count = sum(1 for d in detections if d.label == "person")
+        self.last_full_ts = time.time()
+        self.recent.append(description)
+        if len(self.recent) > 5:
+            self.recent.pop(0)
+
+    def is_repeat(self, text: str) -> bool:
+        """True if this description is basically the same as a recent one."""
+        if text == "SAME" or not text:
+            return True
+        text_words = set(text.lower().split())
+        for prev in self.recent[-3:]:
+            prev_words = set(prev.lower().split())
+            if not text_words or not prev_words:
+                continue
+            overlap = len(text_words & prev_words) / max(len(text_words), len(prev_words))
+            if overlap > 0.75:
+                return True
+        return False
+
+    def get_prompt(self, detections: list) -> str:
+        """Return the right prompt template based on scene state."""
+        det_str = ", ".join(f"{d.label} ({d.confidence:.0%})" for d in detections)
+        if self.should_full_describe(detections):
+            return COSMOS_PROMPT_FIRST.format(detections=det_str)
+        return COSMOS_PROMPT_UPDATE.format(context=self.known, detections=det_str)
 
 
 class Detection:
@@ -241,9 +308,10 @@ class CosmosReasoner:
         self._thread = threading.Thread(target=self._worker, daemon=True)
         self._thread.start()
 
-    def submit(self, alert: Alert, callback: Callable[[Alert, str], None]) -> None:
+    def submit(self, alert: Alert, callback: Callable[[Alert, str], None],
+               memory: 'SceneMemory | None' = None) -> None:
         with self._lock:
-            self._queue.append((alert, callback))
+            self._queue.append((alert, callback, memory))
 
     def _worker(self):
         while True:
@@ -254,15 +322,20 @@ class CosmosReasoner:
             if job is None:
                 time.sleep(0.05)
                 continue
-            alert, callback = job
+            alert, callback, memory = job
             try:
-                reasoning = self._call_vlm(alert)
+                reasoning = self._call_vlm(alert, memory)
+                if reasoning == "SAME" or (memory and memory.is_repeat(reasoning)):
+                    log.info(f"[VLM] Suppressed (no change): {reasoning[:60]}")
+                    continue
                 alert.cosmos_reasoning = reasoning
+                if memory:
+                    memory.update(reasoning, alert.detections)
                 callback(alert, reasoning)
             except Exception as e:
                 log.warning(f"[Cosmos] Reasoning failed: {e}")
 
-    def _call_vlm(self, alert: Alert) -> str:
+    def _call_vlm(self, alert: Alert, memory: 'SceneMemory | None' = None) -> str:
         _, jpg = cv2.imencode(".jpg", alert.frame, [cv2.IMWRITE_JPEG_QUALITY, 60])
         b64 = base64.b64encode(jpg.tobytes()).decode()
 
@@ -293,8 +366,9 @@ class CosmosReasoner:
             log.warning(f"[Step] Failed ({e}), falling back to Cosmos")
 
         # Fallback: Cosmos
-        det_str = ", ".join(f"{d.label} ({d.confidence:.0%})" for d in alert.detections)
-        prompt  = COSMOS_PROMPT.format(detections=det_str)
+        prompt  = memory.get_prompt(alert.detections) if memory else COSMOS_PROMPT_FIRST.format(
+            detections=", ".join(f"{d.label} ({d.confidence:.0%})" for d in alert.detections)
+        )
         payload = {
             "model":    "nvidia/cosmos-reason2-8b",
             "messages": [{"role": "user", "content": [
@@ -432,6 +506,7 @@ class RealtimeMonitor:
         self._detector   = FastDetector(confidence=confidence)
         self._reasoner   = CosmosReasoner()
         self._collector  = DataCollector(enabled=True)
+        self._memory     = SceneMemory()
         self._running    = False
         self._thread:  Optional[threading.Thread] = None
         self._last_alert_ts: float = 0.0
@@ -545,8 +620,8 @@ class RealtimeMonitor:
                     # Save frame + labels immediately (no reasoning yet)
                     self._collector.collect(alert, reasoning="")
 
-                    # Queue async Cosmos reasoning
-                    self._reasoner.submit(alert, self._on_reasoning_done)
+                    # Queue async Cosmos reasoning with scene memory
+                    self._reasoner.submit(alert, self._on_reasoning_done, self._memory)
 
             # --- Cap FPS ---
             elapsed = time.perf_counter() - t_start
