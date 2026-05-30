@@ -1,4 +1,4 @@
-# Session Handoff — 2026-05-30 09:39:46
+# Session Handoff — 2026-05-30 10:06:52
 
 > **READ THIS FIRST.** Written by `write_handoff.py`. Captures live system state at time of writing.
 > Next session: run `cat ~/ai-business/SESSION_HANDOFF_CURRENT.md` before doing anything.
@@ -24,7 +24,7 @@
 - YOLO fine-tune on collected training data when weapon samples are ready
 - Patent #12 ($65, patentcenter.uspto.gov) — Vigil passive audio description for blind
 
-## Service Status at 2026-05-30 09:39:46
+## Service Status at 2026-05-30 10:06:52
 
 | Port | Service | Status |
 |---|---|---|
@@ -41,13 +41,13 @@
 ## System Resources
 
 ```
-Mem:           121Gi       115Gi       7.0Gi       249Mi       6.0Gi       6.4Gi
+Mem:           121Gi       114Gi       8.2Gi       766Mi       5.6Gi       7.1Gi
 GPU (MB used/free/total): [N/A], [N/A], [N/A]
 ```
 
 **Top Python processes:**
 ```
-2379556 1.0 /home/rblake2320/miniconda3/bin/python
+2425460 1.0 /home/rblake2320/miniconda3/bin/python
 3461404 0.0 /home/rblake2320/miniconda3/bin/python
 3014184 0.0 /home/rblake2320/miniconda3/bin/python
 3014162 0.0 /usr/bin/python3
@@ -102,11 +102,11 @@ Elgato 4K X → YOLO11n (CPU, ~110ms) → ALERT fires immediately
 
 ### vigil (rblake2320/vigil)
 ```
-055640d Add audio description pipeline, expanded detection, auto-labeling, and Step-3.7-Flash VLM
-34c4c14 Add real-time two-stage pipeline: YOLO fast trigger + Cosmos async reasoning
-a2a4767 Research: real-time vision AI latency — YOLO vs Cosmos on GB10
-3be064f Complete Vigil platform: detectors, cameras, alerts, architecture docs
-b885199 feat: Vigil Vision-to-Action — fire detection PROVEN 2026-05-29 03:06 AM
+50011e1 Fix Alert crash on empty detections — max() needs default
+21e309a Read text/content when no YOLO detections — fixes silent text slides
+5363b2b Tighten label stabilizer, add VLM time gate, remove refrigerator false positive
+d946c6b Fix scene memory: label-change-only VLM, stabilizer window, immediate label update
+af51d77 Add SceneMemory — smart change-only narration, suppress repeats
 ```
 
 ### behaviorshield-anticheat (rblake2320/behaviorshield-anticheat)
@@ -122,18 +122,18 @@ b885199 feat: Vigil Vision-to-Action — fire detection PROVEN 2026-05-29 03:06 
 
 ### Vigil (/tmp/vigil_live.log)
 ```
-2026-05-30 09:39:41,956 WARNING [Step] Failed (HTTP Error 500: Internal Server Error), falling back to Cosmos
-2026-05-30 09:39:43,753 INFO [VLM] SAFE 
- Person in Argentina jersey on YouTube, terminal windows visible, no immediate threat detected.
-2026-05-30 09:39:44,980 INFO [ALERT] HIGH 
- [{'label': 'person', 'conf': 0.89}]
-2026-05-30 09:39:45,016 WARNING [Step] Failed (HTTP Error 500: Internal Server Error), falling back to Cosmos
-2026-05-30 09:39:46,592 INFO [VLM] SAFE. No immediate threat detected. Monitor for unusual activity or behavior changes.
+2026-05-30 10:06:16,454 INFO [VLM] A computer screen displays multiple open windows, including a terminal, a YouTube video, and a web browser.
+2026-05-30 10:06:24,857 INFO [Monitor] Scene changed: frozenset() 
+ frozenset({'person'})
+2026-05-30 10:06:24,858 INFO [ALERT] HIGH 
+ [{'label': 'person', 'conf': 0.8}]
+2026-05-30 10:06:24,883 WARNING [Step] Failed (HTTP Error 500: Internal Server Error), falling back to Cosmos
+2026-05-30 10:06:26,851 INFO [VLM] A man with a beard and glasses, wearing a white cap and striped shirt, gestures while speaking.
 ```
 
 ## Training Data Collected
 ```
-samples: 2173 | classes: ['person', 'tv', 'suitcase', 'truck', 'car', 'laptop', 'clock', 'motorcycle']
+samples: 3031 | classes: ['person', 'tv', 'suitcase', 'truck', 'car', 'laptop', 'clock', 'refrigerator']
 ```
 
 ## Critical Facts (do not forget)
@@ -150,4 +150,4 @@ samples: 2173 | classes: ['person', 'tv', 'suitcase', 'truck', 'car', 'laptop', 
 - **Step-3.7-Flash:** text-only model, always 500s on vision — keep Cosmos fallback
 
 ---
-*Written by write_handoff.py at 2026-05-30 09:39:46*
+*Written by write_handoff.py at 2026-05-30 10:06:52*
