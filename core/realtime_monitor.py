@@ -111,7 +111,15 @@ SEVERITY = {
 COSMOS_PROMPT_FIRST = (
     "Describe this image in one sentence for a blind person. "
     "Detected: {detections}. "
-    "Name people (clothing, position, action), objects, setting. Specific and concrete. Max 20 words."
+    "If text or words are visible, read them aloud. "
+    "Otherwise name people (clothing, position, action), objects, setting. Max 20 words."
+)
+
+COSMOS_PROMPT_CONTENT = (
+    "Describe this image in one sentence for a blind person. "
+    "If text, words, titles, or captions are visible, READ them exactly. "
+    "If it shows a graphic, chart, or scene with no people, describe what you see. "
+    "Be specific. Max 20 words."
 )
 
 COSMOS_PROMPT_UPDATE = (
@@ -367,9 +375,15 @@ class CosmosReasoner:
             log.warning(f"[Step] Failed ({e}), falling back to Cosmos")
 
         # Fallback: Cosmos
-        prompt  = memory.get_prompt(alert.detections) if memory else COSMOS_PROMPT_FIRST.format(
-            detections=", ".join(f"{d.label} ({d.confidence:.0%})" for d in alert.detections)
-        )
+        if not alert.detections:
+            # No YOLO detections — use content/text-reading prompt
+            prompt = COSMOS_PROMPT_CONTENT
+        elif memory:
+            prompt = memory.get_prompt(alert.detections)
+        else:
+            prompt = COSMOS_PROMPT_FIRST.format(
+                detections=", ".join(f"{d.label} ({d.confidence:.0%})" for d in alert.detections)
+            )
         payload = {
             "model":    "nvidia/cosmos-reason2-8b",
             "messages": [{"role": "user", "content": [
@@ -651,12 +665,36 @@ class RealtimeMonitor:
                     # Queue VLM reasoning
                     self._reasoner.submit(alert, self._on_reasoning_done, self._memory)
 
-            elif self._memory.known_labels:
-                # Everything disappeared from frame — scene cleared
+            else:
+                # No YOLO detections — but may have text, graphics, or other content
+                now = time.time()
                 current_labels = frozenset()
-                if current_labels != self._memory.known_labels:
+                scene_cleared = (current_labels != self._memory.known_labels)
+                vlm_ready = (now - self._last_vlm_ts) >= self._VLM_MIN_GAP
+
+                if scene_cleared:
                     log.info(f"[Monitor] Scene cleared — was: {self._memory.known_labels}")
                     self._memory.known_labels = current_labels
+
+                # Check if frame has visible content (not black/blank)
+                if vlm_ready and (scene_cleared or not self._memory.known):
+                    import numpy as _np
+                    brightness = float(_np.mean(frame))
+                    if brightness > 15:  # non-black frame — something is there
+                        self._last_vlm_ts = now
+                        self.stats["alerts"] += 1
+                        # Create a synthetic "content" detection for the VLM
+                        content_alert = Alert([], frame.copy(), now)
+                        log.info(f"[Monitor] No YOLO detections but frame has content (brightness={brightness:.0f}) — sending to VLM")
+                        # Reset memory so VLM gives full description
+                        self._memory.known = ""
+                        self._memory.known_labels = frozenset()
+                        if self.on_alert:
+                            try:
+                                self.on_alert(content_alert)
+                            except Exception:
+                                pass
+                        self._reasoner.submit(content_alert, self._on_reasoning_done, self._memory)
 
             # --- Cap FPS ---
             elapsed = time.perf_counter() - t_start
