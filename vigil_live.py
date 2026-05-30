@@ -102,22 +102,61 @@ def on_alert(alert: Alert) -> None:
 
 _tts_enabled = True
 _tts_lock = threading.Lock()
+_piper_voice = None
+
+def _load_piper():
+    global _piper_voice
+    try:
+        from piper.voice import PiperVoice
+        model  = str(Path.home() / "piper-voices/en_US-ryan-high.onnx")
+        config = str(Path.home() / "piper-voices/en_US-ryan-high.onnx.json")
+        _piper_voice = PiperVoice.load(model, config_path=config)
+        log.info("[TTS] Piper voice loaded (en_US-ryan-high)")
+    except Exception as e:
+        log.warning(f"[TTS] Piper load failed ({e}) — using espeak fallback")
+
+threading.Thread(target=_load_piper, daemon=True).start()
+
 
 def _speak(text: str) -> None:
     if not _tts_enabled:
         return
-    # Strip status prefixes for cleaner speech
     clean = text.replace("THREAT:", "").replace("SAFE:", "").replace("MONITOR:", "").strip()
     if not clean:
         return
     def _run():
         with _tts_lock:
             try:
-                import subprocess
-                subprocess.run(
-                    ["espeak-ng", "-s", "150", "-v", "en-us", clean],
-                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=15
-                )
+                if _piper_voice is not None:
+                    import wave, tempfile, os, subprocess
+                    import numpy as np
+                    # piper-tts 1.4.2+ returns iterator of AudioChunk
+                    chunks = []
+                    rate = 22050
+                    for chunk in _piper_voice.synthesize(clean):
+                        rate = chunk.sample_rate
+                        chunks.append((chunk.audio_float_array * 32767).astype(np.int16))
+                    if not chunks:
+                        raise RuntimeError("Piper produced no audio")
+                    audio = np.concatenate(chunks)
+                    tmp = tempfile.NamedTemporaryFile(suffix=".wav", delete=False)
+                    tmp.close()
+                    with wave.open(tmp.name, 'wb') as wf:
+                        wf.setnchannels(1)
+                        wf.setsampwidth(2)
+                        wf.setframerate(rate)
+                        wf.writeframes(audio.tobytes())
+                    subprocess.run(
+                        ["paplay", tmp.name],
+                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=20
+                    )
+                    os.unlink(tmp.name)
+                else:
+                    import subprocess
+                    subprocess.run(
+                        ["espeak-ng", "-s", "150", "-v", "en-us", clean],
+                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=15
+                    )
             except Exception as e:
                 log.warning(f"[TTS] {e}")
     threading.Thread(target=_run, daemon=True).start()
@@ -269,6 +308,7 @@ es.onerror = () => addEvent('status', 'status', 'SSE disconnected — retrying..
 </body>
 </html>
 """
+
 
 
 @app.get("/", response_class=HTMLResponse)

@@ -1,0 +1,33 @@
+path: /home/rblake2320/ai-business/vigil/vigil_training
+train: images
+val: images
+nc: 28
+names:
+  - person
+  - baseball bat
+  - tv
+  - motorcycle
+  - truck
+  - car
+  - chair
+  - dog
+  - remote
+  - couch
+  - bed
+  - vase
+  - suitcase
+  - bottle
+  - clock
+  - cell phone
+  - bicycle
+  - refrigerator
+  - toilet
+  - bus
+  - laptop
+  - keyboard
+  - backpack
+  - horse
+  - book
+  - microwave
+  - cat
+  - teddy bear

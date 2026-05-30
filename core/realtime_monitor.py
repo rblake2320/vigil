@@ -195,7 +195,7 @@ class FastDetector:
         times = []
         for _ in range(n):
             t0 = time.perf_counter()
-            self._model(dummy, verbose=False)
+            self._model(dummy, verbose=False, device="cpu")
             times.append((time.perf_counter() - t0) * 1000)
         avg = sum(times[2:]) / len(times[2:])
         log.info(f"[FastDetector] Warmup done — avg {avg:.1f}ms/frame")
@@ -210,6 +210,7 @@ class FastDetector:
             conf=self.confidence,
             classes=self.classes,
             verbose=False,
+            device="cpu",
         )
         elapsed_ms = (time.perf_counter() - t0) * 1000
 
@@ -465,7 +466,11 @@ class RealtimeMonitor:
 
         if not use_mjpeg:
             src = ELGATO_DEV if self.source == "elgato" else self.source
-            cap = cv2.VideoCapture(src)  # no backend flag — let OpenCV auto-select
+            cap = cv2.VideoCapture(src, cv2.CAP_V4L2)
+            cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*'MJPG'))
+            cap.set(cv2.CAP_PROP_FRAME_WIDTH,  1280)
+            cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
+            cap.set(cv2.CAP_PROP_FPS, 30)
             cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
 
         while self._running:
@@ -487,6 +492,8 @@ class RealtimeMonitor:
             if frame is None:
                 time.sleep(0.1)
                 continue
+
+            pass  # no rotation needed — MJPG format preserves correct orientation
 
             # --- Stage 1: YOLO fast detection ---
             detections, ms = self._detector.detect(frame)
