@@ -1,4 +1,4 @@
-# Session Handoff — 2026-05-30 10:09:53
+# Session Handoff — 2026-05-30 12:08:03
 
 > **READ THIS FIRST.** Written by `write_handoff.py`. Captures live system state at time of writing.
 > Next session: run `cat ~/ai-business/SESSION_HANDOFF_CURRENT.md` before doing anything.
@@ -24,7 +24,7 @@
 - YOLO fine-tune on collected training data when weapon samples are ready
 - Patent #12 ($65, patentcenter.uspto.gov) — Vigil passive audio description for blind
 
-## Service Status at 2026-05-30 10:09:53
+## Service Status at 2026-05-30 12:08:03
 
 | Port | Service | Status |
 |---|---|---|
@@ -41,13 +41,13 @@
 ## System Resources
 
 ```
-Mem:           121Gi       115Gi       6.2Gi       770Mi       7.4Gi       6.0Gi
+Mem:           121Gi        92Gi       4.4Gi       164Mi        33Gi        29Gi
 GPU (MB used/free/total): [N/A], [N/A], [N/A]
 ```
 
 **Top Python processes:**
 ```
-2425460 1.0 /home/rblake2320/miniconda3/bin/python
+2502793 0.9 /home/rblake2320/miniconda3/bin/python
 3461404 0.0 /home/rblake2320/miniconda3/bin/python
 3014184 0.0 /home/rblake2320/miniconda3/bin/python
 3014162 0.0 /usr/bin/python3
@@ -102,11 +102,11 @@ Elgato 4K X → YOLO11n (CPU, ~110ms) → ALERT fires immediately
 
 ### vigil (rblake2320/vigil)
 ```
-53b009f handoff: session state 2026-05-30
-50011e1 Fix Alert crash on empty detections — max() needs default
-21e309a Read text/content when no YOLO detections — fixes silent text slides
-5363b2b Tighten label stabilizer, add VLM time gate, remove refrigerator false positive
-d946c6b Fix scene memory: label-change-only VLM, stabilizer window, immediate label update
+a785a96 Fix run_step37.sh: --fit off + ctx 16384 + parallel 1 to prevent RPC crash
+0c668f6 Add infra/: Step-3.7-Flash QSFP distributed inference setup
+1feae43 Step for bootstrap only — Cosmos stays primary for real-time narration
+84162a0 Enable Step-3.7-Flash vision (mmproj loaded) as primary VLM
+b65ec7f Add context-aware commentary engine — boxing/sports/YouTube/news modes
 ```
 
 ### behaviorshield-anticheat (rblake2320/behaviorshield-anticheat)
@@ -122,18 +122,19 @@ d946c6b Fix scene memory: label-change-only VLM, stabilizer window, immediate la
 
 ### Vigil (/tmp/vigil_live.log)
 ```
-2026-05-30 10:09:49,509 INFO [Monitor] Scene cleared 
+2026-05-30 12:06:27,023 INFO [VLM] Suppressed (no change): Person with long hair, partially visible, in a tense or dram
+2026-05-30 12:06:27,242 INFO [Monitor] Scene cleared 
  was: frozenset({'person'})
-2026-05-30 10:09:49,510 INFO [Monitor] No YOLO detections but frame has content (brightness=54) 
- sending to VLM
-2026-05-30 10:09:49,510 INFO [ALERT] MEDIUM 
-2026-05-30 10:09:49,554 WARNING [Step] Failed (HTTP Error 500: Internal Server Error), falling back to Cosmos
-2026-05-30 10:09:51,578 INFO [VLM] Suppressed (no change): A computer screen displays multiple windows, including a ter
+2026-05-30 12:06:30,394 INFO [Monitor] Scene changed: frozenset() 
+ frozenset({'person'})
+2026-05-30 12:06:30,394 INFO [ALERT] HIGH 
+ [{'label': 'person', 'conf': 0.85}, {'label': 'person', 'conf': 0.85}, {'label': 'person', 'conf': 0.53}]
+2026-05-30 12:06:32,371 INFO [VLM] Three individuals lie motionless on the floor, one holding a blood-stained bag.
 ```
 
 ## Training Data Collected
 ```
-samples: 3035 | classes: ['person', 'tv', 'suitcase', 'truck', 'car', 'laptop', 'clock', 'refrigerator']
+samples: 3793 | classes: ['person', 'tv', 'suitcase', 'truck', 'car', 'laptop', 'clock', 'refrigerator']
 ```
 
 ## Critical Facts (do not forget)
@@ -150,4 +151,4 @@ samples: 3035 | classes: ['person', 'tv', 'suitcase', 'truck', 'car', 'laptop', 
 - **Step-3.7-Flash:** text-only model, always 500s on vision — keep Cosmos fallback
 
 ---
-*Written by write_handoff.py at 2026-05-30 10:09:53*
+*Written by write_handoff.py at 2026-05-30 12:08:03*
