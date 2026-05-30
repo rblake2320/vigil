@@ -1,7 +1,7 @@
 path: /home/rblake2320/ai-business/vigil/vigil_training
 train: images
 val: images
-nc: 28
+nc: 29
 names:
   - person
   - baseball bat
@@ -31,3 +31,4 @@ names:
   - microwave
   - cat
   - teddy bear
+  - oven
