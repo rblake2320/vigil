@@ -34,9 +34,9 @@ from ultralytics import YOLO
 
 log = logging.getLogger(__name__)
 
-STEP_URL       = "http://localhost:8898/v1/chat/completions"  # Step-3.7-Flash (primary — 198B MoE, vision enabled)
-COSMOS_URL     = "http://10.0.0.1:8000/v1/chat/completions"  # Cosmos on Spark1 (fallback)
-OLLAMA_VLM_URL = "http://localhost:11434/v1/chat/completions"  # qwen3-vl Ollama (offline)
+COSMOS_URL     = "http://10.0.0.1:8000/v1/chat/completions"  # primary — fast (2-4s), Spark1
+STEP_URL       = "http://localhost:8898/v1/chat/completions"  # bootstrap only — slow (30-40s), vision-enabled 198B MoE
+OLLAMA_VLM_URL = "http://localhost:11434/v1/chat/completions"  # offline
 ELGATO_DEV  = 0  # /dev/video0 — pass as int, not string (OpenCV V4L2 backend)
 STREAM_URL  = "http://localhost:8891/stream"  # CheatVision MJPEG stream
 
@@ -365,33 +365,7 @@ class CosmosReasoner:
             prompt = COSMOS_PROMPT_FIRST.format(
                 detections=", ".join(f"{d.label} ({d.confidence:.0%})" for d in alert.detections)
             )
-        # Primary: Step-3.7-Flash (198B MoE, vision-enabled via mmproj)
-        try:
-            payload = {
-                "model":    "step-3.7-flash",
-                "messages": [
-                    {"role": "system", "content": "Reply in one sentence only. No preamble."},
-                    {"role": "user", "content": [
-                        {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64}"}},
-                        {"type": "text",      "text":      prompt},
-                    ]},
-                ],
-                "max_tokens":  80,
-                "temperature": 0.2,
-            }
-            data = json.dumps(payload).encode()
-            req  = urllib.request.Request(
-                STEP_URL, data=data,
-                headers={"Content-Type": "application/json", "Authorization": "Bearer local"},
-            )
-            with urllib.request.urlopen(req, timeout=25) as r:
-                msg  = json.loads(r.read())["choices"][0]["message"]
-                content = (msg.get("content") or msg.get("reasoning_content") or "").strip()
-                if content:
-                    log.info(f"[Step] {content[:120]}")
-                    return content
-        except Exception as e:
-            log.warning(f"[Step] Failed ({e}), falling back to Cosmos")
+        # Primary: Cosmos on Spark1 — fast (2-4s), reliable for real-time narration
 
         # Fallback: Cosmos on Spark1
         payload = {
