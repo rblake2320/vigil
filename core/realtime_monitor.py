@@ -320,9 +320,10 @@ class CosmosReasoner:
         self._thread.start()
 
     def submit(self, alert: Alert, callback: Callable[[Alert, str], None],
-               memory: 'SceneMemory | None' = None) -> None:
+               memory: 'SceneMemory | None' = None,
+               override_prompt: str | None = None) -> None:
         with self._lock:
-            self._queue.append((alert, callback, memory))
+            self._queue.append((alert, callback, memory, override_prompt))
 
     def _worker(self):
         while True:
@@ -333,12 +334,14 @@ class CosmosReasoner:
             if job is None:
                 time.sleep(0.05)
                 continue
-            alert, callback, memory = job
+            alert, callback, memory, override_prompt = job
             try:
-                reasoning = self._call_vlm(alert, memory)
-                if reasoning == "SAME" or (memory and memory.is_repeat(reasoning)):
-                    log.info(f"[VLM] Suppressed (no change): {reasoning[:60]}")
-                    continue
+                reasoning = self._call_vlm(alert, memory, override_prompt)
+                # In continuous/sports mode don't suppress — always narrate
+                if override_prompt is None:
+                    if reasoning == "SAME" or (memory and memory.is_repeat(reasoning)):
+                        log.info(f"[VLM] Suppressed (no change): {reasoning[:60]}")
+                        continue
                 alert.cosmos_reasoning = reasoning
                 if memory:
                     memory.update(reasoning, alert.detections)
@@ -346,12 +349,15 @@ class CosmosReasoner:
             except Exception as e:
                 log.warning(f"[VLM] Reasoning failed: {e}")
 
-    def _call_vlm(self, alert: Alert, memory: 'SceneMemory | None' = None) -> str:
+    def _call_vlm(self, alert: Alert, memory: 'SceneMemory | None' = None,
+                  override_prompt: str | None = None) -> str:
         _, jpg = cv2.imencode(".jpg", alert.frame, [cv2.IMWRITE_JPEG_QUALITY, 60])
         b64 = base64.b64encode(jpg.tobytes()).decode()
 
-        # Primary: qwen3-vl local (Ollama, no Spark1 dependency)
-        if not alert.detections:
+        # Override prompt wins (continuous/context mode)
+        if override_prompt:
+            prompt = override_prompt
+        elif not alert.detections:
             prompt = COSMOS_PROMPT_CONTENT
         elif memory:
             prompt = memory.get_prompt(alert.detections)
@@ -541,6 +547,10 @@ class RealtimeMonitor:
         self._thread:  Optional[threading.Thread] = None
         self._last_alert_ts: float = 0.0
 
+        # Context session — set externally via set_context()
+        self.context: Optional[object] = None  # ContextSession when active
+        self._continuous_thread: Optional[threading.Thread] = None
+
         # Rolling stats
         self.stats = {
             "frames":     0,
@@ -562,6 +572,47 @@ class RealtimeMonitor:
         self._running = False
         if self._thread:
             self._thread.join(timeout=3)
+
+    def set_context(self, ctx) -> None:
+        """Load a ContextSession — switches prompt style and starts continuous mode if needed."""
+        self.context = ctx
+        self._memory.known = ""       # reset scene memory so first description is fresh
+        self._memory.known_labels = frozenset()
+        self._memory.recent = []
+        self._last_vlm_ts = 0.0
+        if ctx and ctx.commentary_mode == "continuous":
+            self._VLM_MIN_GAP = ctx.interval
+            if self._continuous_thread is None or not self._continuous_thread.is_alive():
+                self._continuous_thread = threading.Thread(
+                    target=self._continuous_loop, daemon=True)
+                self._continuous_thread.start()
+            log.info(f"[Monitor] Context set — {ctx.describe()}")
+        elif ctx:
+            self._VLM_MIN_GAP = ctx.interval
+            log.info(f"[Monitor] Context set — {ctx.describe()}")
+
+    def _continuous_loop(self) -> None:
+        """Fires VLM on a timer for continuous commentary modes (sports, boxing)."""
+        import numpy as _np
+        while self._running:
+            ctx = self.context
+            if not ctx or ctx.commentary_mode != "continuous":
+                time.sleep(1.0)
+                continue
+            time.sleep(ctx.interval)
+            # Grab latest frame
+            frame = getattr(self, '_latest_frame_for_continuous', None)
+            if frame is None:
+                continue
+            now = time.time()
+            self._last_vlm_ts = now
+            prompt = ctx.build_prompt(self._memory.known)
+            # Submit directly to reasoner with a synthetic alert
+            dets = getattr(self, '_latest_detections_for_continuous', [])
+            alert = Alert(dets, frame.copy(), now)
+            log.info(f"[Continuous] Firing VLM — {ctx.type} mode")
+            self._reasoner.submit(alert, self._on_reasoning_done, self._memory,
+                                  override_prompt=prompt)
 
     def _loop(self) -> None:
         frame_interval = 1.0 / self.fps_cap
@@ -599,6 +650,9 @@ class RealtimeMonitor:
                 time.sleep(0.1)
                 continue
 
+            # Store for continuous commentary loop
+            self._latest_frame_for_continuous = frame
+
             # Apply ROI crop if set (from UI focus/hover mode)
             roi = getattr(self, 'focus_roi', None)
             detect_frame = frame
@@ -612,6 +666,7 @@ class RealtimeMonitor:
 
             # --- Stage 1: YOLO fast detection ---
             detections, ms = self._detector.detect(detect_frame)
+            self._latest_detections_for_continuous = detections
 
             # Remap detection boxes back to full-frame coordinates if ROI was used
             if roi:

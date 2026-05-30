@@ -26,6 +26,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 sys.path.insert(0, str(Path(__file__).parent))
 from core.realtime_monitor import RealtimeMonitor, Alert, Detection
+from core.context_session import ContextSession, bootstrap_from_frame
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger(__name__)
@@ -238,6 +239,11 @@ header h1{font-size:14px;font-weight:600;color:#fff}
 <header>
   <div class="logo">V</div>
   <h1>Vigil — Real-Time Monitor</h1>
+  <div id="ctxBar" style="margin-left:12px;font-size:11px;color:#76b900;background:#0a1a0a;padding:3px 10px;border-radius:10px;border:1px solid #1a3a1a;max-width:340px;overflow:hidden;white-space:nowrap;text-overflow:ellipsis">
+    General mode
+  </div>
+  <button onclick="doBootstrap()" style="margin-left:8px;background:#0a1a0a;border:1px solid #76b900;color:#76b900;padding:3px 10px;border-radius:6px;font-size:11px;cursor:pointer" title="Auto-detect scene type, channel, sport, fighters...">⚡ Bootstrap</button>
+  <button onclick="clearContext()" style="margin-left:4px;background:#0a0a0a;border:1px solid #333;color:#555;padding:3px 8px;border-radius:6px;font-size:11px;cursor:pointer">✕</button>
   <div id="statBar">
     <div class="stat"><span id="sFPS">—</span>FPS</div>
     <div class="stat"><span id="sMS">—</span>ms/frame</div>
@@ -336,6 +342,27 @@ es.addEventListener('status', e => {
   const d = JSON.parse(e.data);
   addEvent('status', 'status', d.msg, d.ts);
 });
+
+es.addEventListener('context', e => {
+  const d = JSON.parse(e.data);
+  document.getElementById('ctxBar').textContent = d.description || 'General mode';
+  const color = d.mode === 'continuous' ? '#ffaa00' : '#76b900';
+  document.getElementById('ctxBar').style.color = color;
+  document.getElementById('ctxBar').style.borderColor = color;
+  addEvent('status', '🎯 CONTEXT', d.description, null);
+});
+
+async function doBootstrap() {
+  document.getElementById('ctxBar').textContent = 'Bootstrapping...';
+  const r = await fetch('/bootstrap', {method:'POST'});
+  const d = await r.json();
+}
+
+async function clearContext() {
+  await fetch('/context/clear', {method:'POST'});
+  document.getElementById('ctxBar').textContent = 'General mode';
+  document.getElementById('ctxBar').style.color = '#76b900';
+}
 
 es.addEventListener('chat', e => {
   const d = JSON.parse(e.data);
@@ -654,6 +681,71 @@ async def roi_hover(req: HoverRequest):
     x2 = min(1.0, req.cx + req.hw); y2 = min(1.0, req.cy + req.hh)
     _focus_roi = (x1, y1, x2, y2)
     return {"roi": _focus_roi}
+
+
+class ContextSetRequest(BaseModel):
+    type: str = "general"
+    channel: str | None = None
+    topic: str | None = None
+    entities: dict = {}
+    commentary_mode: str = "change_only"
+    interval_seconds: float = 8.0
+
+@app.post("/bootstrap")
+async def bootstrap():
+    """Auto-detect scene type, channel, entities from current frame. Sets context."""
+    frame = _latest_raw_frame
+    if frame is None:
+        return {"error": "no frame available"}
+    def _do():
+        ctx = bootstrap_from_frame(frame)
+        if ctx and _monitor:
+            _monitor.set_context(ctx)
+            _push("context", {"description": ctx.describe(), "type": ctx.type,
+                              "mode": ctx.commentary_mode, "interval": ctx.interval,
+                              "entities": ctx.entities, "channel": ctx.channel,
+                              "topic": ctx.topic})
+            log.info(f"[Bootstrap] Context applied: {ctx.describe()}")
+        else:
+            _push("context", {"description": "Bootstrap failed — using general mode",
+                              "type": "general", "mode": "change_only"})
+    threading.Thread(target=_do, daemon=True).start()
+    return {"status": "bootstrapping"}
+
+@app.post("/context/set")
+async def context_set(req: ContextSetRequest):
+    """Manually set context (e.g. 'boxing', fighters=['Canelo','Bivol'])."""
+    ctx = ContextSession(
+        type=req.type, channel=req.channel, topic=req.topic,
+        entities=req.entities, commentary_mode=req.commentary_mode,
+        interval=req.interval_seconds, active=True,
+    )
+    if _monitor:
+        _monitor.set_context(ctx)
+    _push("context", {"description": ctx.describe(), "type": ctx.type,
+                      "mode": ctx.commentary_mode, "interval": ctx.interval,
+                      "entities": ctx.entities})
+    return {"status": "ok", "context": ctx.describe()}
+
+@app.post("/context/clear")
+async def context_clear():
+    """Reset to general mode."""
+    ctx = ContextSession(type="general", commentary_mode="change_only",
+                         interval=8.0, active=False)
+    if _monitor:
+        _monitor.set_context(ctx)
+    _push("context", {"description": "General mode", "type": "general",
+                      "mode": "change_only"})
+    return {"status": "cleared"}
+
+@app.get("/context")
+async def context_get():
+    if _monitor and _monitor.context:
+        c = _monitor.context
+        return {"type": c.type, "description": c.describe(),
+                "mode": c.commentary_mode, "interval": c.interval,
+                "active": c.active}
+    return {"type": "general", "active": False}
 
 
 def _start_monitor(source, confidence):
