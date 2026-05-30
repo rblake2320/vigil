@@ -748,6 +748,25 @@ async def context_get():
     return {"type": "general", "active": False}
 
 
+def _warmup_step():
+    """Fire a dummy vision call to load the mmproj into memory. First call is ~27s, then 2-3s."""
+    import urllib.request as _ur, json as _json, base64 as _b64, numpy as _np, cv2 as _cv2
+    try:
+        dummy = _np.zeros((64, 64, 3), dtype=_np.uint8)
+        _, jpg = _cv2.imencode(".jpg", dummy)
+        b64 = _b64.b64encode(jpg.tobytes()).decode()
+        payload = {"model":"step-3.7-flash","messages":[{"role":"user","content":[
+            {"type":"image_url","image_url":{"url":f"data:image/jpeg;base64,{b64}"}},
+            {"type":"text","text":"ready"}
+        ]}],"max_tokens":5}
+        req = _ur.Request("http://localhost:8898/v1/chat/completions",
+            data=_json.dumps(payload).encode(),
+            headers={"Content-Type":"application/json","Authorization":"Bearer local"})
+        _ur.urlopen(req, timeout=60)
+        log.info("[Step] Vision warmup done — mmproj loaded, subsequent calls ~2-3s")
+    except Exception as e:
+        log.warning(f"[Step] Vision warmup failed ({e}) — first call will be slow")
+
 def _start_monitor(source, confidence):
     global _monitor
     _monitor = RealtimeMonitor(source=source, confidence=confidence, cooldown_s=8.0, fps_cap=30)
@@ -755,6 +774,8 @@ def _start_monitor(source, confidence):
     _monitor.on_alert     = on_alert
     _monitor.on_reasoning = on_reasoning
     _monitor.start()
+    # Warm Step-3.7-Flash vision in background so first real call is fast
+    threading.Thread(target=_warmup_step, daemon=True).start()
     log.info("[Vigil] Monitor running")
 
 
