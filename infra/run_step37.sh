@@ -51,12 +51,13 @@ LD_LIBRARY_PATH=~/stepfun-llama/build-cuda/bin:$LD_LIBRARY_PATH \
     --model "$SHARD1" \
     --host 0.0.0.0 \
     --port 8898 \
-    --ctx-size 32768 \
+    --ctx-size 16384 \
     --n-gpu-layers $GPU_LAYERS \
     --threads 8 \
-    --parallel 2 \
+    --parallel 1 \
     --flash-attn on \
     --log-prefix \
+    -fit off \
     $VISION_ARGS \
     $RPC_ARGS \
     "$@"
