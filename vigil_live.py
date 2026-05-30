@@ -39,6 +39,8 @@ _clients: list[asyncio.Queue] = []
 _event_loop: asyncio.AbstractEventLoop | None = None
 _latest_frame_b64: str = ""
 _latest_stats: dict = {}
+_latest_raw_frame = None  # raw numpy frame for capture mode
+_capture_state: dict = {"active": False, "label": "", "until": 0.0, "count": 0}
 
 
 def _push(event: str, data: dict) -> None:
@@ -53,7 +55,8 @@ def _push(event: str, data: dict) -> None:
 
 
 def on_frame(frame, detections: list[Detection], ms: float) -> None:
-    global _latest_frame_b64, _latest_stats
+    global _latest_frame_b64, _latest_stats, _latest_raw_frame
+    _latest_raw_frame = frame
     # Encode frame
     _, jpg = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 60])
     b64 = base64.b64encode(jpg.tobytes()).decode()
@@ -97,14 +100,38 @@ def on_alert(alert: Alert) -> None:
     })
 
 
+_tts_enabled = True
+_tts_lock = threading.Lock()
+
+def _speak(text: str) -> None:
+    if not _tts_enabled:
+        return
+    # Strip status prefixes for cleaner speech
+    clean = text.replace("THREAT:", "").replace("SAFE:", "").replace("MONITOR:", "").strip()
+    if not clean:
+        return
+    def _run():
+        with _tts_lock:
+            try:
+                import subprocess
+                subprocess.run(
+                    ["espeak-ng", "-s", "150", "-v", "en-us", clean],
+                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=15
+                )
+            except Exception as e:
+                log.warning(f"[TTS] {e}")
+    threading.Thread(target=_run, daemon=True).start()
+
+
 def on_reasoning(alert: Alert, reasoning: str) -> None:
-    log.info(f"[COSMOS] {reasoning[:80]}")
+    log.info(f"[VLM] {reasoning[:120]}")
     _push("reasoning", {
         "text": reasoning,
         "severity": alert.severity,
         "ts": time.time(),
         "is_threat": reasoning.upper().startswith("THREAT"),
     })
+    _speak(reasoning)
 
 
 # ── HTML UI ────────────────────────────────────────────────────────────────
@@ -278,6 +305,101 @@ async def events(request: Request):
 @app.get("/stats")
 async def stats():
     return _latest_stats
+
+@app.post("/tts/toggle")
+async def tts_toggle():
+    global _tts_enabled
+    _tts_enabled = not _tts_enabled
+    return {"tts": "on" if _tts_enabled else "off"}
+
+@app.get("/tts/status")
+async def tts_status():
+    return {"tts": "on" if _tts_enabled else "off"}
+
+
+@app.get("/training")
+async def training_stats():
+    from core.realtime_monitor import DataCollector
+    import json as _json
+    base = DataCollector.BASE
+    images = list((base / "images").glob("*.jpg")) if (base / "images").exists() else []
+    labels = list((base / "labels").glob("*.txt")) if (base / "labels").exists() else []
+    yaml_path = base / "data.yaml"
+    classes = {}
+    if (base / "meta").exists():
+        for f in (base / "meta").glob("*.meta.json"):
+            try:
+                m = _json.loads(f.read_text())
+                for d in m.get("detections", []):
+                    lbl = d["label"]
+                    classes[lbl] = classes.get(lbl, 0) + 1
+            except Exception:
+                pass
+    return {
+        "total_samples": len(images),
+        "labeled": len(labels),
+        "classes_seen": classes,
+        "data_yaml": str(yaml_path) if yaml_path.exists() else None,
+        "output_dir": str(base),
+    }
+
+
+from pydantic import BaseModel
+
+class CaptureRequest(BaseModel):
+    label: str
+    seconds: int = 10
+    fps: int = 5  # frames per second to save
+
+@app.post("/capture/start")
+async def capture_start(req: CaptureRequest):
+    """Start capturing labeled frames. Hold object in front of camera for `seconds`."""
+    global _capture_state
+    _capture_state = {
+        "active": True,
+        "label": req.label.strip().lower().replace(" ", "_"),
+        "until": time.time() + req.seconds,
+        "count": 0,
+        "fps": req.fps,
+        "last_saved": 0.0,
+    }
+    threading.Thread(target=_capture_loop, daemon=True).start()
+    log.info(f"[Capture] Started — label='{req.label}' for {req.seconds}s")
+    return {"status": "capturing", "label": req.label, "seconds": req.seconds}
+
+@app.post("/capture/stop")
+async def capture_stop():
+    global _capture_state
+    saved = _capture_state.get("count", 0)
+    _capture_state["active"] = False
+    return {"status": "stopped", "saved": saved}
+
+@app.get("/capture/status")
+async def capture_status():
+    s = _capture_state
+    remaining = max(0.0, s.get("until", 0) - time.time()) if s.get("active") else 0
+    return {"active": s.get("active", False), "label": s.get("label", ""), "saved": s.get("count", 0), "remaining_s": round(remaining, 1)}
+
+def _capture_loop():
+    from core.realtime_monitor import DataCollector, Detection, Alert
+    import numpy as np
+    collector = DataCollector(enabled=True)
+    interval = 1.0 / _capture_state.get("fps", 5)
+    while _capture_state.get("active") and time.time() < _capture_state.get("until", 0):
+        now = time.time()
+        if now - _capture_state.get("last_saved", 0) >= interval:
+            frame = _latest_raw_frame
+            if frame is not None:
+                label = _capture_state["label"]
+                # Create a synthetic full-frame detection for this label
+                det = Detection(label=label, confidence=1.0, box=(0.05, 0.05, 0.95, 0.95), ts=now)
+                alert = Alert(detections=[det], frame=frame.copy(), ts=now)
+                collector.collect(alert, reasoning=f"manual capture: {label}")
+                _capture_state["count"] = _capture_state.get("count", 0) + 1
+                _capture_state["last_saved"] = now
+        time.sleep(0.05)
+    _capture_state["active"] = False
+    log.info(f"[Capture] Done — saved {_capture_state.get('count', 0)} frames for '{_capture_state.get('label')}'")
 
 
 def _start_monitor(source, confidence):

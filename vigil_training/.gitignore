@@ -1,0 +1,10 @@
+# Ignore collected training data (images/labels) — too large for git
+images/
+labels/
+meta/
+*.jpg
+*.jpeg
+*.png
+# Keep the structure and yaml
+!.gitkeep
+!data.yaml

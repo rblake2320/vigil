@@ -28,37 +28,96 @@ import urllib.request
 from collections import deque
 from pathlib import Path
 from typing import Callable, Optional
+import os
 
 from ultralytics import YOLO
 
 log = logging.getLogger(__name__)
 
-COSMOS_URL  = "http://10.0.0.1:8000/v1/chat/completions"
-ELGATO_DEV  = "/dev/video0"
+COSMOS_URL  = "http://10.0.0.1:8000/v1/chat/completions"   # Cosmos fallback
+STEP_URL    = "http://localhost:8898/v1/chat/completions"  # Step-3.7-Flash (primary, local)
+ELGATO_DEV  = 0  # /dev/video0 — pass as int, not string (OpenCV V4L2 backend)
 STREAM_URL  = "http://localhost:8891/stream"  # CheatVision MJPEG stream
 
-# COCO classes we care about for Vigil scenarios
+# COCO classes — full coverage: people, devices, vehicles, weapons, bags, animals
 VIGIL_CLASSES = {
+    # People
     0:  "person",
-    56: "chair",    # person sitting/fallen
-    57: "couch",
+    # Vehicles
+    1:  "bicycle",
+    2:  "car",
+    3:  "motorcycle",
+    5:  "bus",
+    7:  "truck",
+    # Weapons / dangerous objects
+    34: "baseball bat",
+    43: "knife",
+    76: "scissors",
+    # Bags / carry items
+    24: "backpack",
+    26: "handbag",
+    28: "suitcase",
+    # Electronics / devices
+    62: "tv",
+    63: "laptop",
+    64: "mouse",
+    65: "remote",
+    66: "keyboard",
     67: "cell phone",
-    73: "laptop",
+    68: "microwave",
+    69: "oven",
+    70: "toaster",
+    72: "refrigerator",
+    # Furniture / environment
+    56: "chair",
+    57: "couch",
+    59: "bed",
+    60: "dining table",
+    61: "toilet",
+    # Animals
+    15: "cat",
+    16: "dog",
+    17: "horse",
+    # Other security-relevant
+    39: "bottle",
+    73: "book",
+    74: "clock",
+    75: "vase",
+    77: "teddy bear",
 }
 
 # Alert severity by class
 SEVERITY = {
-    "person": "HIGH",
-    "default": "MEDIUM",
+    "person":       "HIGH",
+    "knife":        "CRITICAL",
+    "scissors":     "HIGH",
+    "baseball bat": "HIGH",
+    "car":          "MEDIUM",
+    "truck":        "MEDIUM",
+    "motorcycle":   "MEDIUM",
+    "bus":          "MEDIUM",
+    "bicycle":      "LOW",
+    "backpack":     "MEDIUM",
+    "suitcase":     "MEDIUM",
+    "handbag":      "LOW",
+    "laptop":       "MEDIUM",
+    "cell phone":   "LOW",
+    "tv":           "LOW",
+    "dog":          "MEDIUM",
+    "cat":          "LOW",
+    "default":      "LOW",
 }
 
 COSMOS_PROMPT = (
-    "You are a real-time security and safety AI. A fast detector just triggered on this frame.\n"
-    "Detections: {detections}\n\n"
-    "In 2 sentences max:\n"
-    "1. Describe exactly what you see (position, action, any threat indicators)\n"
-    "2. Recommended action (monitor / alert owner / call 911)\n\n"
-    "Start with THREAT: or SAFE: or MONITOR: based on your assessment."
+    "Security AI. Detections: {detections}\n"
+    "Reply in ONE line: THREAT/SAFE/MONITOR — what you see — action. Max 15 words."
+)
+
+# Step-3.7-Flash prompt — rich scene description for audio description / blind accessibility
+STEP_PROMPT = (
+    "Describe this scene in one sentence for a blind person. "
+    "Name specific objects, people (appearance, clothing, action), and what is happening. "
+    "Be concrete and specific — no vague words like 'various' or 'several'. Max 20 words."
 )
 
 
@@ -195,28 +254,52 @@ class CosmosReasoner:
                 continue
             alert, callback = job
             try:
-                reasoning = self._call_cosmos(alert)
+                reasoning = self._call_vlm(alert)
                 alert.cosmos_reasoning = reasoning
                 callback(alert, reasoning)
             except Exception as e:
                 log.warning(f"[Cosmos] Reasoning failed: {e}")
 
-    def _call_cosmos(self, alert: Alert) -> str:
-        _, jpg = cv2.imencode(".jpg", alert.frame, [cv2.IMWRITE_JPEG_QUALITY, 75])
+    def _call_vlm(self, alert: Alert) -> str:
+        _, jpg = cv2.imencode(".jpg", alert.frame, [cv2.IMWRITE_JPEG_QUALITY, 60])
         b64 = base64.b64encode(jpg.tobytes()).decode()
 
-        det_str = ", ".join(
-            f"{d.label} ({d.confidence:.0%})" for d in alert.detections
-        )
-        prompt = COSMOS_PROMPT.format(detections=det_str)
+        # Try Step-3.7-Flash first (richer descriptions, faster)
+        try:
+            payload = {
+                "model":    "step-3.7-flash",
+                "messages": [{"role": "user", "content": [
+                    {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64}"}},
+                    {"type": "text",      "text":      STEP_PROMPT},
+                ]}],
+                "max_tokens":  120,
+                "temperature": 0.2,
+            }
+            data = json.dumps(payload).encode()
+            req  = urllib.request.Request(
+                STEP_URL, data=data,
+                headers={"Content-Type": "application/json", "Authorization": "Bearer local"},
+            )
+            with urllib.request.urlopen(req, timeout=20) as r:
+                resp = json.loads(r.read())
+                msg  = resp["choices"][0]["message"]
+                # Step returns answer in content; reasoning is in reasoning_content
+                text = (msg.get("content") or msg.get("reasoning_content") or "").strip()
+                log.info(f"[Step] {text[:120]}")
+                return text
+        except Exception as e:
+            log.warning(f"[Step] Failed ({e}), falling back to Cosmos")
 
+        # Fallback: Cosmos
+        det_str = ", ".join(f"{d.label} ({d.confidence:.0%})" for d in alert.detections)
+        prompt  = COSMOS_PROMPT.format(detections=det_str)
         payload = {
             "model":    "nvidia/cosmos-reason2-8b",
             "messages": [{"role": "user", "content": [
                 {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64}"}},
                 {"type": "text",      "text":      prompt},
             ]}],
-            "max_tokens":  120,
+            "max_tokens":  40,
             "temperature": 0.1,
         }
         data = json.dumps(payload).encode()
@@ -226,6 +309,97 @@ class CosmosReasoner:
         )
         with urllib.request.urlopen(req, timeout=30) as r:
             return json.loads(r.read())["choices"][0]["message"]["content"]
+
+
+class DataCollector:
+    """
+    Auto-labeling pipeline. On every alert:
+      - saves frame as JPEG
+      - saves YOLO-format .txt annotation (class_id cx cy w h, normalized)
+      - saves .meta.json with Cosmos reasoning + confidence
+    Directory layout:
+      vigil_training/
+        images/  *.jpg
+        labels/  *.txt          (YOLO format)
+        meta/    *.meta.json    (Cosmos text + detections)
+        data.yaml               (ready for yolo train)
+    """
+
+    BASE = Path(__file__).parent.parent / "vigil_training"
+
+    # Map label name → sequential class id for the training dataset
+    _class_map: dict[str, int] = {}
+    _lock = threading.Lock()
+
+    def __init__(self, enabled: bool = True):
+        self.enabled = enabled
+        if enabled:
+            (self.BASE / "images").mkdir(parents=True, exist_ok=True)
+            (self.BASE / "labels").mkdir(parents=True, exist_ok=True)
+            (self.BASE / "meta").mkdir(parents=True, exist_ok=True)
+            self._load_class_map()
+            log.info(f"[DataCollector] Saving training data → {self.BASE}")
+
+    def _load_class_map(self):
+        yaml_path = self.BASE / "data.yaml"
+        if yaml_path.exists():
+            import yaml
+            with open(yaml_path) as f:
+                d = yaml.safe_load(f)
+            names = d.get("names", [])
+            DataCollector._class_map = {n: i for i, n in enumerate(names)}
+
+    def _save_yaml(self):
+        names = sorted(DataCollector._class_map, key=lambda k: DataCollector._class_map[k])
+        yaml_path = self.BASE / "data.yaml"
+        lines = [
+            "path: " + str(self.BASE),
+            "train: images",
+            "val: images",
+            f"nc: {len(names)}",
+            "names:",
+        ] + [f"  - {n}" for n in names]
+        yaml_path.write_text("\n".join(lines) + "\n")
+
+    def collect(self, alert: Alert, reasoning: str = "") -> None:
+        if not self.enabled:
+            return
+        try:
+            ts = int(alert.ts * 1000)
+            stem = f"vigil_{ts}"
+
+            # Save image
+            img_path = self.BASE / "images" / f"{stem}.jpg"
+            cv2.imwrite(str(img_path), alert.frame, [cv2.IMWRITE_JPEG_QUALITY, 85])
+
+            # Build YOLO label lines
+            h, w = alert.frame.shape[:2]
+            lines = []
+            with self._lock:
+                for d in alert.detections:
+                    if d.label not in DataCollector._class_map:
+                        DataCollector._class_map[d.label] = len(DataCollector._class_map)
+                        self._save_yaml()
+                    cid = DataCollector._class_map[d.label]
+                    x1, y1, x2, y2 = (d.box[0]*w, d.box[1]*h, d.box[2]*w, d.box[3]*h)
+                    cx = ((x1 + x2) / 2) / w
+                    cy = ((y1 + y2) / 2) / h
+                    bw = (x2 - x1) / w
+                    bh = (y2 - y1) / h
+                    lines.append(f"{cid} {cx:.6f} {cy:.6f} {bw:.6f} {bh:.6f}")
+
+            (self.BASE / "labels" / f"{stem}.txt").write_text("\n".join(lines) + "\n")
+
+            # Save metadata
+            meta = {
+                "ts": alert.ts,
+                "reasoning": reasoning,
+                "detections": [{"label": d.label, "conf": round(d.confidence, 3)} for d in alert.detections],
+            }
+            (self.BASE / "meta" / f"{stem}.meta.json").write_text(json.dumps(meta, indent=2))
+
+        except Exception as e:
+            log.warning(f"[DataCollector] Save failed: {e}")
 
 
 class RealtimeMonitor:
@@ -253,9 +427,10 @@ class RealtimeMonitor:
         self.on_reasoning: Optional[Callable] = None
         self.on_frame:     Optional[Callable] = None
 
-        self._detector = FastDetector(confidence=confidence)
-        self._reasoner = CosmosReasoner()
-        self._running  = False
+        self._detector   = FastDetector(confidence=confidence)
+        self._reasoner   = CosmosReasoner()
+        self._collector  = DataCollector(enabled=True)
+        self._running    = False
         self._thread:  Optional[threading.Thread] = None
         self._last_alert_ts: float = 0.0
 
@@ -290,7 +465,7 @@ class RealtimeMonitor:
 
         if not use_mjpeg:
             src = ELGATO_DEV if self.source == "elgato" else self.source
-            cap = cv2.VideoCapture(src, cv2.CAP_V4L2)
+            cap = cv2.VideoCapture(src)  # no backend flag — let OpenCV auto-select
             cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
 
         while self._running:
@@ -343,6 +518,9 @@ class RealtimeMonitor:
                         except Exception as e:
                             log.warning(f"[Monitor] on_alert error: {e}")
 
+                    # Save frame + labels immediately (no reasoning yet)
+                    self._collector.collect(alert, reasoning="")
+
                     # Queue async Cosmos reasoning
                     self._reasoner.submit(alert, self._on_reasoning_done)
 
@@ -356,6 +534,8 @@ class RealtimeMonitor:
             cap.release()
 
     def _on_reasoning_done(self, alert: Alert, reasoning: str) -> None:
+        # Update meta file with Cosmos reasoning
+        self._collector.collect(alert, reasoning=reasoning)
         if self.on_reasoning:
             try:
                 self.on_reasoning(alert, reasoning)
