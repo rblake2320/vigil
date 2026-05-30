@@ -109,11 +109,12 @@ SEVERITY = {
 }
 
 COSMOS_PROMPT = (
-    "Security AI. Detections: {detections}\n"
-    "Reply in ONE line: THREAT/SAFE/MONITOR — what you see — action. Max 15 words."
+    "Describe this image in one sentence for a blind person. "
+    "Detected objects: {detections}. "
+    "Name exactly what you see — people (clothing, position, action), objects, setting. "
+    "Be specific and concrete. No threat assessment. Max 20 words."
 )
 
-# Step-3.7-Flash prompt — rich scene description for audio description / blind accessibility
 STEP_PROMPT = (
     "Describe this scene in one sentence for a blind person. "
     "Name specific objects, people (appearance, clothing, action), and what is happening. "
@@ -493,10 +494,26 @@ class RealtimeMonitor:
                 time.sleep(0.1)
                 continue
 
-            pass  # no rotation needed — MJPG format preserves correct orientation
+            # Apply ROI crop if set (from UI focus/hover mode)
+            roi = getattr(self, 'focus_roi', None)
+            detect_frame = frame
+            roi_offset = (0, 0)
+            if roi:
+                h, w = frame.shape[:2]
+                x1 = int(roi[0]*w); y1 = int(roi[1]*h)
+                x2 = int(roi[2]*w); y2 = int(roi[3]*h)
+                detect_frame = frame[y1:y2, x1:x2]
+                roi_offset = (x1/w, y1/h)
 
             # --- Stage 1: YOLO fast detection ---
-            detections, ms = self._detector.detect(frame)
+            detections, ms = self._detector.detect(detect_frame)
+
+            # Remap detection boxes back to full-frame coordinates if ROI was used
+            if roi and roi_offset != (0,0):
+                rw = roi[2]-roi[0]; rh = roi[3]-roi[1]
+                for d in detections:
+                    bx1,by1,bx2,by2 = d.box
+                    d.box = (roi[0]+bx1*rw, roi[1]+by1*rh, roi[0]+bx2*rw, roi[1]+by2*rh)
 
             # Update stats
             self.stats["frames"] += 1

@@ -42,6 +42,12 @@ _latest_stats: dict = {}
 _latest_raw_frame = None  # raw numpy frame for capture mode
 _capture_state: dict = {"active": False, "label": "", "until": 0.0, "count": 0}
 
+# Focus ROI: normalized (x1,y1,x2,y2) or None for full frame
+_focus_roi: tuple | None = None
+# Hover mode: mouse position drives ROI
+_hover_mode: bool = False
+_hover_pos: tuple = (0.5, 0.5)  # normalized (cx, cy)
+
 
 def _push(event: str, data: dict) -> None:
     """Push SSE event to all connected browsers."""
@@ -57,6 +63,9 @@ def _push(event: str, data: dict) -> None:
 def on_frame(frame, detections: list[Detection], ms: float) -> None:
     global _latest_frame_b64, _latest_stats, _latest_raw_frame
     _latest_raw_frame = frame
+    # Sync ROI into monitor so detect loop can use it
+    if _monitor:
+        _monitor.focus_roi = _focus_roi
     # Encode frame
     _, jpg = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 60])
     b64 = base64.b64encode(jpg.tobytes()).decode()
@@ -200,7 +209,7 @@ header h1{font-size:14px;font-weight:600;color:#fff}
 .badge.fps{background:#111;color:#76b900;border:1px solid #2a2a1a}
 .badge.ms{background:#111;color:#aaa;border:1px solid #222}
 .right-panel{display:flex;flex-direction:column;border-left:1px solid #1a1a2a;overflow:hidden}
-.panel-hdr{font-size:10px;color:#444;padding:6px 10px;border-bottom:1px solid #1a1a2a;text-transform:uppercase;letter-spacing:1px}
+.panel-hdr{font-size:10px;color:#444;padding:6px 10px;border-bottom:1px solid #1a1a2a;text-transform:uppercase;letter-spacing:1px;display:flex;align-items:center;justify-content:space-between}
 #eventLog{flex:1;overflow-y:auto;padding:8px;display:flex;flex-direction:column;gap:6px}
 .ev{padding:8px 10px;border-radius:8px;font-size:12px;line-height:1.5}
 .ev.alert{background:#1a0808;border-left:3px solid #c00;color:#ffaaaa}
@@ -208,8 +217,21 @@ header h1{font-size:14px;font-weight:600;color:#fff}
 .ev.threat{background:#200808;border-left:3px solid #ff0000;color:#ff9999}
 .ev.safe{background:#08120a;border-left:3px solid #00c060;color:#99ffbb}
 .ev.status{background:#0a0a10;border-left:3px solid #333;color:#555;font-size:10px;font-style:italic}
+.ev.chat-q{background:#0d0d20;border-left:3px solid #4488ff;color:#aaccff}
+.ev.chat-a{background:#0a1a0a;border-left:3px solid #00cc88;color:#aaffcc}
 .ev-ts{font-size:9px;color:#333;margin-bottom:3px;font-family:monospace}
 .ev-label{font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:1px;margin-bottom:3px;opacity:0.7}
+#chatBar{padding:8px;border-top:1px solid #1a1a2a;display:flex;gap:6px;background:#080810}
+#chatInput{flex:1;background:#111;border:1px solid #2a2a3a;color:#eee;padding:6px 10px;border-radius:6px;font-size:12px;font-family:inherit}
+#chatInput:focus{outline:none;border-color:#76b900}
+#chatSend{background:#76b900;color:#000;border:none;padding:6px 12px;border-radius:6px;font-size:12px;font-weight:700;cursor:pointer}
+#chatSend:disabled{opacity:0.4;cursor:default}
+#focusBar{padding:6px 10px;border-top:1px solid #1a1a2a;background:#06060e;display:flex;gap:8px;align-items:center;font-size:11px;color:#555}
+.fbtn{background:#111;border:1px solid #2a2a2a;color:#aaa;padding:3px 10px;border-radius:4px;font-size:10px;cursor:pointer}
+.fbtn.active{border-color:#76b900;color:#76b900}
+#focusIndicator{font-size:10px;color:#444;margin-left:auto}
+#roiOverlay{position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none}
+#hoverBox{position:absolute;border:2px solid #76b900;border-radius:4px;pointer-events:none;display:none;box-shadow:0 0 8px #76b90066}
 </style>
 </head>
 <body>
@@ -225,8 +247,9 @@ header h1{font-size:14px;font-weight:600;color:#fff}
 </header>
 <div id="alertBanner"></div>
 <div class="main">
-  <div class="feed-panel">
+  <div class="feed-panel" id="feedPanel">
     <img id="feedImg" src="" alt="Connecting...">
+    <div id="hoverBox"></div>
     <div class="feed-overlay">
       <div class="badge live" id="liveBadge">● LIVE</div>
       <div class="badge fps" id="fpsBadge">—fps</div>
@@ -234,9 +257,21 @@ header h1{font-size:14px;font-weight:600;color:#fff}
     </div>
   </div>
   <div class="right-panel">
-    <div class="panel-hdr">Events — Stage 1 (YOLO) + Stage 2 (Cosmos)</div>
+    <div class="panel-hdr">
+      <span>Events — YOLO + Cosmos</span>
+    </div>
     <div id="eventLog">
       <div class="ev status"><div class="ev-ts">--:--:--</div>Connecting to real-time pipeline...</div>
+    </div>
+    <div id="focusBar">
+      <button class="fbtn" id="btnFull" onclick="setFocus('full')">Full Frame</button>
+      <button class="fbtn" id="btnDraw" onclick="setFocus('draw')">Draw ROI</button>
+      <button class="fbtn" id="btnHover" onclick="setFocus('hover')">Hover Mode</button>
+      <span id="focusIndicator">focus: full</span>
+    </div>
+    <div id="chatBar">
+      <input id="chatInput" type="text" placeholder="Ask about the scene..." onkeydown="if(event.key==='Enter')sendChat()">
+      <button id="chatSend" onclick="sendChat()">Ask</button>
     </div>
   </div>
 </div>
@@ -293,9 +328,8 @@ es.addEventListener('alert', e => {
 
 es.addEventListener('reasoning', e => {
   const d = JSON.parse(e.data);
-  const cls = d.is_threat ? 'threat' : (d.text.toLowerCase().includes('safe') ? 'safe' : 'reasoning');
-  const label = d.is_threat ? '🔴 COSMOS: THREAT' : '🟢 COSMOS: REASONING';
-  addEvent(cls, label, d.text, d.ts);
+  const cls = d.is_threat ? 'threat' : 'reasoning';
+  addEvent(cls, '🟢 VIGIL', d.text, d.ts);
 });
 
 es.addEventListener('status', e => {
@@ -303,7 +337,116 @@ es.addEventListener('status', e => {
   addEvent('status', 'status', d.msg, d.ts);
 });
 
+es.addEventListener('chat', e => {
+  const d = JSON.parse(e.data);
+  addEvent('chat-a', '💬 ANSWER', d.text, null);
+  document.getElementById('chatSend').disabled = false;
+  document.getElementById('chatInput').disabled = false;
+});
+
 es.onerror = () => addEvent('status', 'status', 'SSE disconnected — retrying...', null);
+
+// ── Chat ────────────────────────────────────────────────────────────────────
+async function sendChat() {
+  const inp = document.getElementById('chatInput');
+  const q = inp.value.trim();
+  if (!q) return;
+  inp.value = '';
+  document.getElementById('chatSend').disabled = true;
+  inp.disabled = true;
+  addEvent('chat-q', '❓ YOU', q, null);
+  await fetch('/ask', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({question: q})});
+}
+
+// ── Focus / ROI / Hover ──────────────────────────────────────────────────────
+let focusMode = 'full';
+let drawing = false, drawStart = null;
+
+function setFocus(mode) {
+  focusMode = mode;
+  ['btnFull','btnDraw','btnHover'].forEach(id => document.getElementById(id).classList.remove('active'));
+  document.getElementById('btn' + mode.charAt(0).toUpperCase() + mode.slice(1)).classList.add('active');
+
+  const panel = document.getElementById('feedPanel');
+  const box   = document.getElementById('hoverBox');
+
+  if (mode === 'full') {
+    fetch('/roi/clear', {method:'POST'});
+    box.style.display = 'none';
+    document.getElementById('focusIndicator').textContent = 'focus: full frame';
+  } else if (mode === 'draw') {
+    document.getElementById('focusIndicator').textContent = 'focus: draw box on feed';
+    box.style.display = 'none';
+  } else if (mode === 'hover') {
+    fetch('/roi/clear', {method:'POST'});
+    document.getElementById('focusIndicator').textContent = 'focus: hover (move mouse over feed)';
+    box.style.display = 'block';
+  }
+}
+
+// Draw ROI on feed
+const panel = document.getElementById('feedPanel');
+let roiRect = null;
+
+panel.addEventListener('mousedown', e => {
+  if (focusMode !== 'draw') return;
+  drawing = true;
+  const r = panel.getBoundingClientRect();
+  drawStart = {x: (e.clientX - r.left)/r.width, y: (e.clientY - r.top)/r.height};
+});
+
+panel.addEventListener('mousemove', e => {
+  const r = panel.getBoundingClientRect();
+  const nx = (e.clientX - r.left) / r.width;
+  const ny = (e.clientY - r.top)  / r.height;
+
+  if (focusMode === 'hover') {
+    const hw = 0.25, hh = 0.25;
+    const x1 = Math.max(0, nx - hw), y1 = Math.max(0, ny - hh);
+    const x2 = Math.min(1, nx + hw), y2 = Math.min(1, ny + hh);
+    const box = document.getElementById('hoverBox');
+    box.style.left   = (x1 * r.width)  + 'px';
+    box.style.top    = (y1 * r.height) + 'px';
+    box.style.width  = ((x2-x1) * r.width)  + 'px';
+    box.style.height = ((y2-y1) * r.height) + 'px';
+    // Throttle server update to 10/s
+    if (!panel._hoverThrottle || Date.now() - panel._hoverThrottle > 100) {
+      panel._hoverThrottle = Date.now();
+      fetch('/roi/hover', {method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({cx: nx, cy: ny, hw: hw, hh: hh})});
+    }
+  }
+
+  if (focusMode === 'draw' && drawing && drawStart) {
+    const box = document.getElementById('hoverBox');
+    const x1 = Math.min(drawStart.x, nx), y1 = Math.min(drawStart.y, ny);
+    const x2 = Math.max(drawStart.x, nx), y2 = Math.max(drawStart.y, ny);
+    box.style.display = 'block';
+    box.style.left   = (x1 * r.width)  + 'px';
+    box.style.top    = (y1 * r.height) + 'px';
+    box.style.width  = ((x2-x1) * r.width)  + 'px';
+    box.style.height = ((y2-y1) * r.height) + 'px';
+  }
+});
+
+panel.addEventListener('mouseup', e => {
+  if (focusMode !== 'draw' || !drawing) return;
+  drawing = false;
+  const r = panel.getBoundingClientRect();
+  const nx = (e.clientX - r.left) / r.width;
+  const ny = (e.clientY - r.top)  / r.height;
+  const x1 = Math.min(drawStart.x, nx), y1 = Math.min(drawStart.y, ny);
+  const x2 = Math.max(drawStart.x, nx), y2 = Math.max(drawStart.y, ny);
+  if (x2-x1 > 0.05 && y2-y1 > 0.05) {
+    fetch('/roi/set', {method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({x1,y1,x2,y2})});
+    document.getElementById('focusIndicator').textContent =
+      `focus: ROI (${Math.round(x1*100)}%,${Math.round(y1*100)}%) → (${Math.round(x2*100)}%,${Math.round(y2*100)}%)`;
+  }
+});
+
+// Init
+setFocus('full');
 </script>
 </body>
 </html>
@@ -440,6 +583,77 @@ def _capture_loop():
         time.sleep(0.05)
     _capture_state["active"] = False
     log.info(f"[Capture] Done — saved {_capture_state.get('count', 0)} frames for '{_capture_state.get('label')}'")
+
+
+class AskRequest(BaseModel):
+    question: str
+
+class RoiRequest(BaseModel):
+    x1: float = 0.0; y1: float = 0.0; x2: float = 1.0; y2: float = 1.0
+
+class HoverRequest(BaseModel):
+    cx: float; cy: float; hw: float = 0.25; hh: float = 0.25
+
+@app.post("/ask")
+async def ask(req: AskRequest):
+    """Ask a question about the current frame — answered by VLM and spoken aloud."""
+    global _latest_raw_frame
+    frame = _latest_raw_frame
+    if frame is None:
+        return {"error": "no frame available"}
+    import base64, cv2, json as _json, urllib.request
+    from core.realtime_monitor import COSMOS_URL, STEP_URL, STEP_PROMPT
+    _, jpg = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 70])
+    b64 = base64.b64encode(jpg.tobytes()).decode()
+    prompt = f"Looking at this image: {req.question.strip()} Answer in one clear sentence."
+    def _do():
+        try:
+            payload = {"model": "step-3.7-flash", "messages": [{"role":"user","content":[
+                {"type":"image_url","image_url":{"url":f"data:image/jpeg;base64,{b64}"}},
+                {"type":"text","text":prompt}]}], "max_tokens":80, "temperature":0.2}
+            r = urllib.request.urlopen(urllib.request.Request(
+                STEP_URL, data=_json.dumps(payload).encode(),
+                headers={"Content-Type":"application/json","Authorization":"Bearer local"}), timeout=12)
+            msg = _json.loads(r.read())["choices"][0]["message"]
+            answer = (msg.get("content") or msg.get("reasoning_content","")).strip()
+        except Exception:
+            try:
+                payload = {"model":"nvidia/cosmos-reason2-8b","messages":[{"role":"user","content":[
+                    {"type":"image_url","image_url":{"url":f"data:image/jpeg;base64,{b64}"}},
+                    {"type":"text","text":prompt}]}],"max_tokens":80,"temperature":0.2}
+                r = urllib.request.urlopen(urllib.request.Request(
+                    COSMOS_URL, data=_json.dumps(payload).encode(),
+                    headers={"Content-Type":"application/json","Authorization":"Bearer local"}), timeout=20)
+                answer = _json.loads(r.read())["choices"][0]["message"]["content"].strip()
+            except Exception as e:
+                answer = f"Could not answer: {e}"
+        log.info(f"[Chat] Q: {req.question[:60]} → A: {answer[:80]}")
+        _push("chat", {"text": answer})
+        _speak(answer)
+    threading.Thread(target=_do, daemon=True).start()
+    return {"status": "processing"}
+
+@app.post("/roi/set")
+async def roi_set(req: RoiRequest):
+    global _focus_roi
+    _focus_roi = (req.x1, req.y1, req.x2, req.y2)
+    log.info(f"[ROI] Set to {_focus_roi}")
+    return {"roi": _focus_roi}
+
+@app.post("/roi/clear")
+async def roi_clear():
+    global _focus_roi
+    _focus_roi = None
+    log.info("[ROI] Cleared — full frame")
+    return {"roi": None}
+
+@app.post("/roi/hover")
+async def roi_hover(req: HoverRequest):
+    global _focus_roi
+    x1 = max(0.0, req.cx - req.hw); y1 = max(0.0, req.cy - req.hh)
+    x2 = min(1.0, req.cx + req.hw); y2 = min(1.0, req.cy + req.hh)
+    _focus_roi = (x1, y1, x2, y2)
+    return {"roi": _focus_roi}
 
 
 def _start_monitor(source, confidence):
