@@ -67,7 +67,7 @@ VIGIL_CLASSES = {
     68: "microwave",
     69: "oven",
     70: "toaster",
-    72: "refrigerator",
+    # 72: "refrigerator",  # removed — too many false positives on bookshelves/cabinets
     # Furniture / environment
     56: "chair",
     57: "couch",
@@ -509,10 +509,12 @@ class RealtimeMonitor:
         self._collector  = DataCollector(enabled=True)
         self._memory     = SceneMemory()
         self._running    = False
-        # Label stabilizer: label must appear in ≥3 of last 5 frames to count
+        # Label stabilizer: label must appear in ≥7 of last 10 frames to count as stable
         self._label_window: list[frozenset] = []
-        self._WINDOW = 5
-        self._QUORUM = 3
+        self._WINDOW = 10
+        self._QUORUM = 7
+        self._last_vlm_ts: float = 0.0   # time gate — min 5s between any VLM call
+        self._VLM_MIN_GAP = 5.0
         self._thread:  Optional[threading.Thread] = None
         self._last_alert_ts: float = 0.0
 
@@ -625,14 +627,15 @@ class RealtimeMonitor:
                 scene_changed = (current_labels != self._memory.known_labels)
 
                 # Only fire VLM if: scene labels changed OR enough time passed since last alert
-                if scene_changed or (now - self._last_alert_ts >= self.cooldown_s and not self._memory.known_labels):
+                vlm_ready = (now - self._last_vlm_ts) >= self._VLM_MIN_GAP
+                if (scene_changed or not self._memory.known_labels) and vlm_ready:
                     self._last_alert_ts = now
+                    self._last_vlm_ts = now
                     self.stats["alerts"] += 1
                     alert = Alert(stable_detections, frame.copy(), now)
 
                     if scene_changed:
                         log.info(f"[Monitor] Scene changed: {self._memory.known_labels} → {current_labels}")
-                        # Update label tracking immediately — don't wait for VLM
                         self._memory.known_labels = current_labels
 
                     # Fire immediate alert
