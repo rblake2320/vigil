@@ -34,8 +34,9 @@ from ultralytics import YOLO
 
 log = logging.getLogger(__name__)
 
-COSMOS_URL  = "http://10.0.0.1:8000/v1/chat/completions"   # Cosmos fallback
-STEP_URL    = "http://localhost:8898/v1/chat/completions"  # Step-3.7-Flash (primary, local)
+OLLAMA_VLM_URL = "http://localhost:11434/v1/chat/completions"  # qwen3-vl (local, primary)
+COSMOS_URL     = "http://10.0.0.1:8000/v1/chat/completions"  # Cosmos on Spark1 (fallback)
+STEP_URL       = "http://localhost:8898/v1/chat/completions"  # Step-3.7-Flash (text-only, disabled)
 ELGATO_DEV  = 0  # /dev/video0 — pass as int, not string (OpenCV V4L2 backend)
 STREAM_URL  = "http://localhost:8891/stream"  # CheatVision MJPEG stream
 
@@ -343,41 +344,14 @@ class CosmosReasoner:
                     memory.update(reasoning, alert.detections)
                 callback(alert, reasoning)
             except Exception as e:
-                log.warning(f"[Cosmos] Reasoning failed: {e}")
+                log.warning(f"[VLM] Reasoning failed: {e}")
 
     def _call_vlm(self, alert: Alert, memory: 'SceneMemory | None' = None) -> str:
         _, jpg = cv2.imencode(".jpg", alert.frame, [cv2.IMWRITE_JPEG_QUALITY, 60])
         b64 = base64.b64encode(jpg.tobytes()).decode()
 
-        # Try Step-3.7-Flash first (richer descriptions, faster)
-        try:
-            payload = {
-                "model":    "step-3.7-flash",
-                "messages": [{"role": "user", "content": [
-                    {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64}"}},
-                    {"type": "text",      "text":      STEP_PROMPT},
-                ]}],
-                "max_tokens":  120,
-                "temperature": 0.2,
-            }
-            data = json.dumps(payload).encode()
-            req  = urllib.request.Request(
-                STEP_URL, data=data,
-                headers={"Content-Type": "application/json", "Authorization": "Bearer local"},
-            )
-            with urllib.request.urlopen(req, timeout=20) as r:
-                resp = json.loads(r.read())
-                msg  = resp["choices"][0]["message"]
-                # Step returns answer in content; reasoning is in reasoning_content
-                text = (msg.get("content") or msg.get("reasoning_content") or "").strip()
-                log.info(f"[Step] {text[:120]}")
-                return text
-        except Exception as e:
-            log.warning(f"[Step] Failed ({e}), falling back to Cosmos")
-
-        # Fallback: Cosmos
+        # Primary: qwen3-vl local (Ollama, no Spark1 dependency)
         if not alert.detections:
-            # No YOLO detections — use content/text-reading prompt
             prompt = COSMOS_PROMPT_CONTENT
         elif memory:
             prompt = memory.get_prompt(alert.detections)
@@ -385,6 +359,40 @@ class CosmosReasoner:
             prompt = COSMOS_PROMPT_FIRST.format(
                 detections=", ".join(f"{d.label} ({d.confidence:.0%})" for d in alert.detections)
             )
+        try:
+            payload = {
+                "model":    "qwen3-vl:latest",
+                "messages": [
+                    {"role": "system", "content": "Reply in one sentence only. No preamble."},
+                    {"role": "user", "content": [
+                        {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64}"}},
+                        {"type": "text",      "text":      prompt},
+                    ]},
+                ],
+                "max_tokens":  600,
+                "temperature": 0.1,
+            }
+            data = json.dumps(payload).encode()
+            req  = urllib.request.Request(
+                OLLAMA_VLM_URL, data=data,
+                headers={"Content-Type": "application/json", "Authorization": "Bearer local"},
+            )
+            with urllib.request.urlopen(req, timeout=30) as r:
+                msg  = json.loads(r.read())["choices"][0]["message"]
+                content = msg.get("content", "").strip()
+                if not content:
+                    # Thinking model: extract answer after </think> if present
+                    raw = msg.get("reasoning", "") or msg.get("reasoning_content", "")
+                    if "</think>" in raw:
+                        content = raw.split("</think>", 1)[1].strip()
+                    else:
+                        content = raw.strip()
+                log.info(f"[VLM] {content[:120]}")
+                return content
+        except Exception as e:
+            log.warning(f"[VLM] Local failed ({e}), falling back to Cosmos on Spark1")
+
+        # Fallback: Cosmos on Spark1
         payload = {
             "model":    "nvidia/cosmos-reason2-8b",
             "messages": [{"role": "user", "content": [
