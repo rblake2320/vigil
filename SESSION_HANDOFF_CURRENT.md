@@ -1,4 +1,4 @@
-# Session Handoff — 2026-05-30 12:08:03
+# Session Handoff — 2026-05-31 01:11:27
 
 > **READ THIS FIRST.** Written by `write_handoff.py`. Captures live system state at time of writing.
 > Next session: run `cat ~/ai-business/SESSION_HANDOFF_CURRENT.md` before doing anything.
@@ -24,7 +24,7 @@
 - YOLO fine-tune on collected training data when weapon samples are ready
 - Patent #12 ($65, patentcenter.uspto.gov) — Vigil passive audio description for blind
 
-## Service Status at 2026-05-30 12:08:03
+## Service Status at 2026-05-31 01:11:27
 
 | Port | Service | Status |
 |---|---|---|
@@ -41,13 +41,13 @@
 ## System Resources
 
 ```
-Mem:           121Gi        92Gi       4.4Gi       164Mi        33Gi        29Gi
+Mem:           121Gi       101Gi       5.4Gi       685Mi        22Gi        20Gi
 GPU (MB used/free/total): [N/A], [N/A], [N/A]
 ```
 
 **Top Python processes:**
 ```
-2502793 0.9 /home/rblake2320/miniconda3/bin/python
+3556305 0.9 /home/rblake2320/miniconda3/bin/python
 3461404 0.0 /home/rblake2320/miniconda3/bin/python
 3014184 0.0 /home/rblake2320/miniconda3/bin/python
 3014162 0.0 /usr/bin/python3
@@ -102,11 +102,11 @@ Elgato 4K X → YOLO11n (CPU, ~110ms) → ALERT fires immediately
 
 ### vigil (rblake2320/vigil)
 ```
+1e9573c Step-3.7-Flash as primary VLM with mmproj vision warmup
+6b09d05 handoff: session state 2026-05-30
 a785a96 Fix run_step37.sh: --fit off + ctx 16384 + parallel 1 to prevent RPC crash
 0c668f6 Add infra/: Step-3.7-Flash QSFP distributed inference setup
 1feae43 Step for bootstrap only — Cosmos stays primary for real-time narration
-84162a0 Enable Step-3.7-Flash vision (mmproj loaded) as primary VLM
-b65ec7f Add context-aware commentary engine — boxing/sports/YouTube/news modes
 ```
 
 ### behaviorshield-anticheat (rblake2320/behaviorshield-anticheat)
@@ -122,19 +122,18 @@ b65ec7f Add context-aware commentary engine — boxing/sports/YouTube/news modes
 
 ### Vigil (/tmp/vigil_live.log)
 ```
-2026-05-30 12:06:27,023 INFO [VLM] Suppressed (no change): Person with long hair, partially visible, in a tense or dram
-2026-05-30 12:06:27,242 INFO [Monitor] Scene cleared 
- was: frozenset({'person'})
-2026-05-30 12:06:30,394 INFO [Monitor] Scene changed: frozenset() 
- frozenset({'person'})
-2026-05-30 12:06:30,394 INFO [ALERT] HIGH 
- [{'label': 'person', 'conf': 0.85}, {'label': 'person', 'conf': 0.85}, {'label': 'person', 'conf': 0.53}]
-2026-05-30 12:06:32,371 INFO [VLM] Three individuals lie motionless on the floor, one holding a blood-stained bag.
+2026-05-31 01:11:18,614 INFO [Vigil] Monitor running
+2026-05-31 01:11:20,144 INFO [Monitor] No YOLO detections but frame has content (brightness=168) 
+ sending to VLM
+2026-05-31 01:11:20,144 INFO [ALERT] MEDIUM 
+2026-05-31 01:11:25,216 INFO [Monitor] No YOLO detections but frame has content (brightness=168) 
+ sending to VLM
+2026-05-31 01:11:25,216 INFO [ALERT] MEDIUM
 ```
 
 ## Training Data Collected
 ```
-samples: 3793 | classes: ['person', 'tv', 'suitcase', 'truck', 'car', 'laptop', 'clock', 'refrigerator']
+samples: 8521 | classes: ['person', 'tv', 'suitcase', 'truck', 'car', 'laptop', 'chair', 'clock']
 ```
 
 ## Critical Facts (do not forget)
@@ -151,4 +150,4 @@ samples: 3793 | classes: ['person', 'tv', 'suitcase', 'truck', 'car', 'laptop', 
 - **Step-3.7-Flash:** text-only model, always 500s on vision — keep Cosmos fallback
 
 ---
-*Written by write_handoff.py at 2026-05-30 12:08:03*
+*Written by write_handoff.py at 2026-05-31 01:11:27*
