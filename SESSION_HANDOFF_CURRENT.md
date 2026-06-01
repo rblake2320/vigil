@@ -1,4 +1,4 @@
-# Session Handoff — 2026-06-01 00:48:19
+# Session Handoff — 2026-06-01 00:50:08
 
 > **READ THIS FIRST.** Written by `write_handoff.py`. Captures live system state at time of writing.
 > Next session: run `cat ~/ai-business/SESSION_HANDOFF_CURRENT.md` before doing anything.
@@ -24,7 +24,7 @@
 - YOLO fine-tune on collected training data when weapon samples are ready
 - Patent #12 ($65, patentcenter.uspto.gov) — Vigil passive audio description for blind
 
-## Service Status at 2026-06-01 00:48:19
+## Service Status at 2026-06-01 00:50:08
 
 | Port | Service | Status |
 |---|---|---|
@@ -41,7 +41,7 @@
 ## System Resources
 
 ```
-Mem:           121Gi       101Gi       4.0Gi       674Mi        23Gi        19Gi
+Mem:           121Gi       101Gi       4.0Gi       676Mi        23Gi        19Gi
 GPU (MB used/free/total): [N/A], [N/A], [N/A]
 ```
 
@@ -102,11 +102,11 @@ Elgato 4K X → YOLO11n (CPU, ~110ms) → ALERT fires immediately
 
 ### vigil (rblake2320/vigil)
 ```
+89b54fa handoff: session state 2026-06-01
 ae09976 Deploy fine-tuned YOLO11n v1 (mAP50=0.547, 0.755 avg conf vs 0.551 stock)
 f5798f0 handoff: session state 2026-05-31
 1e9573c Step-3.7-Flash as primary VLM with mmproj vision warmup
 6b09d05 handoff: session state 2026-05-30
-a785a96 Fix run_step37.sh: --fit off + ctx 16384 + parallel 1 to prevent RPC crash
 ```
 
 ### behaviorshield-anticheat (rblake2320/behaviorshield-anticheat)
@@ -122,15 +122,14 @@ a785a96 Fix run_step37.sh: --fit off + ctx 16384 + parallel 1 to prevent RPC cra
 
 ### Vigil (/tmp/vigil_live.log)
 ```
-2026-06-01 00:47:54,587 INFO [Monitor] Scene cleared 
- was: frozenset({'person'})
-2026-06-01 00:47:59,823 INFO [Monitor] No YOLO detections but frame has content (brightness=17) 
- sending to VLM
-2026-06-01 00:47:59,823 INFO [ALERT] MEDIUM 
-2026-06-01 00:48:09,829 INFO [Monitor] Scene changed: frozenset() 
+2026-06-01 00:49:51,758 INFO [ALERT] MEDIUM 
+2026-06-01 00:50:01,759 INFO [Monitor] Scene changed: frozenset() 
  frozenset({'person'})
-2026-06-01 00:48:09,829 INFO [ALERT] HIGH 
- [{'label': 'person', 'conf': 0.87}]
+2026-06-01 00:50:01,759 INFO [ALERT] HIGH 
+ [{'label': 'person', 'conf': 0.94}]
+2026-06-01 00:50:05,513 INFO [Monitor] Scene cleared 
+ was: frozenset({'person'})
+2026-06-01 00:50:05,734 WARNING [Step] Failed (timed out), falling back to Cosmos
 ```
 
 ## Training Data Collected
@@ -152,4 +151,4 @@ a785a96 Fix run_step37.sh: --fit off + ctx 16384 + parallel 1 to prevent RPC cra
 - **Step-3.7-Flash:** text-only model, always 500s on vision — keep Cosmos fallback
 
 ---
-*Written by write_handoff.py at 2026-06-01 00:48:19*
+*Written by write_handoff.py at 2026-06-01 00:50:08*
