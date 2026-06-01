@@ -1,4 +1,4 @@
-# Session Handoff — 2026-06-01 00:50:08
+# Session Handoff — 2026-06-01 09:56:30
 
 > **READ THIS FIRST.** Written by `write_handoff.py`. Captures live system state at time of writing.
 > Next session: run `cat ~/ai-business/SESSION_HANDOFF_CURRENT.md` before doing anything.
@@ -24,7 +24,7 @@
 - YOLO fine-tune on collected training data when weapon samples are ready
 - Patent #12 ($65, patentcenter.uspto.gov) — Vigil passive audio description for blind
 
-## Service Status at 2026-06-01 00:50:08
+## Service Status at 2026-06-01 09:56:30
 
 | Port | Service | Status |
 |---|---|---|
@@ -41,18 +41,18 @@
 ## System Resources
 
 ```
-Mem:           121Gi       101Gi       4.0Gi       676Mi        23Gi        19Gi
+Mem:           121Gi       109Gi        12Gi       241Mi       6.5Gi        11Gi
 GPU (MB used/free/total): [N/A], [N/A], [N/A]
 ```
 
 **Top Python processes:**
 ```
-3988569 0.8 /home/rblake2320/miniconda3/bin/python
+263317 1.1 /home/rblake2320/miniconda3/bin/python
+207832 0.6 /home/rblake2320/miniconda3/bin/python
 3461404 0.0 /home/rblake2320/miniconda3/bin/python
 3014184 0.0 /home/rblake2320/miniconda3/bin/python
-3014162 0.0 /usr/bin/python3
+1378586 0.0 /usr/bin/python3
 1012296 0.0 /home/rblake2320/miniconda3/bin/python
-2615184 0.0 /usr/bin/python3
 ```
 
 ## Start Commands
@@ -102,11 +102,11 @@ Elgato 4K X → YOLO11n (CPU, ~110ms) → ALERT fires immediately
 
 ### vigil (rblake2320/vigil)
 ```
-89b54fa handoff: session state 2026-06-01
-ae09976 Deploy fine-tuned YOLO11n v1 (mAP50=0.547, 0.755 avg conf vs 0.551 stock)
-f5798f0 handoff: session state 2026-05-31
-1e9573c Step-3.7-Flash as primary VLM with mmproj vision warmup
-6b09d05 handoff: session state 2026-05-30
+fde132d Bootstrap: multi-frame Step input, 90% quality, robust JSON extraction
+5d617b9 Bootstrap: raise timeout 30s→120s, honest UI messaging
+ff1ca17 Remove Step-3.7-Flash, fix VLM quality (JPEG 60%→85%, max_tokens 40→80)
+7b0d4a3 Deploy fine-tuned YOLO11n v2 (mAP50=0.871, 50 epochs)
+b426ceb handoff: session state 2026-06-01
 ```
 
 ### behaviorshield-anticheat (rblake2320/behaviorshield-anticheat)
@@ -122,14 +122,14 @@ f5798f0 handoff: session state 2026-05-31
 
 ### Vigil (/tmp/vigil_live.log)
 ```
-2026-06-01 00:49:51,758 INFO [ALERT] MEDIUM 
-2026-06-01 00:50:01,759 INFO [Monitor] Scene changed: frozenset() 
- frozenset({'person'})
-2026-06-01 00:50:01,759 INFO [ALERT] HIGH 
- [{'label': 'person', 'conf': 0.94}]
-2026-06-01 00:50:05,513 INFO [Monitor] Scene cleared 
- was: frozenset({'person'})
-2026-06-01 00:50:05,734 WARNING [Step] Failed (timed out), falling back to Cosmos
+2026-06-01 08:19:24,527 INFO [VLM] A computer screen displays a terminal window with code and text, alongside a file explorer and other desktop icons.
+2026-06-01 09:50:42,795 INFO [Monitor] Scene changed: frozenset() 
+ frozenset({'bus'})
+2026-06-01 09:50:42,796 INFO [ALERT] MEDIUM 
+ [{'label': 'bus', 'conf': 0.84}]
+2026-06-01 09:50:44,228 INFO [VLM] A bus is visible in the background of the computer screen.
+2026-06-01 09:50:45,670 INFO [Monitor] Scene cleared 
+ was: frozenset({'bus'})
 ```
 
 ## Training Data Collected
@@ -151,4 +151,4 @@ f5798f0 handoff: session state 2026-05-31
 - **Step-3.7-Flash:** text-only model, always 500s on vision — keep Cosmos fallback
 
 ---
-*Written by write_handoff.py at 2026-06-01 00:50:08*
+*Written by write_handoff.py at 2026-06-01 09:56:30*
