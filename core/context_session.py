@@ -168,42 +168,62 @@ class ContextSession:
             return DOMAIN_PROMPTS["general"]
 
 
-def bootstrap_from_frame(frame, vlm_url: str = STEP_URL) -> Optional[ContextSession]:
+def bootstrap_from_frame(frames, vlm_url: str = STEP_URL) -> Optional[ContextSession]:
     """
-    Send a frame to the VLM to classify the scene and extract context.
-    Returns a populated ContextSession or None on failure.
+    Send 1–3 frames to Step for deep scene classification and entity extraction.
+    Multi-frame lets Step reason across time (scene vs snapshot).
+    Falls back to Cosmos (single frame) if Step fails.
     """
     import cv2
-    _, jpg = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 70])
-    b64 = base64.b64encode(jpg.tobytes()).decode()
+    if not isinstance(frames, list):
+        frames = [frames]
 
-    def _call(url, model):
-        p = {"model": model, "messages": [{"role": "user", "content": [
-            {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64}"}},
-            {"type": "text", "text": BOOTSTRAP_PROMPT},
-        ]}], "max_tokens": 300, "temperature": 0.1}
+    def _encode(f):
+        _, jpg = cv2.imencode(".jpg", f, [cv2.IMWRITE_JPEG_QUALITY, 90])
+        return base64.b64encode(jpg.tobytes()).decode()
+
+    def _call(url, model, use_multi=True):
+        content = []
+        # Step supports multiple image_url items in one message (256K context)
+        # Cosmos: send only the last frame to keep it simple
+        send_frames = frames if (use_multi and len(frames) > 1) else [frames[-1]]
+        if len(send_frames) > 1:
+            content.append({"type": "text",
+                "text": f"I'm sending you {len(send_frames)} frames from the same broadcast, "
+                        "sampled a few seconds apart. Analyze all of them together."})
+        for f in send_frames:
+            content.append({"type": "image_url",
+                "image_url": {"url": f"data:image/jpeg;base64,{_encode(f)}"}})
+        content.append({"type": "text", "text": BOOTSTRAP_PROMPT})
+
+        p = {"model": model, "messages": [{"role": "user", "content": content}],
+             "max_tokens": 400, "temperature": 0.1}
         req = urllib.request.Request(url, data=json.dumps(p).encode(),
             headers={"Content-Type": "application/json", "Authorization": "Bearer local"})
         with urllib.request.urlopen(req, timeout=120) as r:
             msg = json.loads(r.read())["choices"][0]["message"]
             return (msg.get("content") or msg.get("reasoning_content") or "").strip()
 
-    # Try Step first, fall back to Cosmos
+    # Try Step (multi-frame), fall back to Cosmos (single frame)
     text = ""
     try:
-        text = _call(STEP_URL, "step-3.7-flash")
+        text = _call(STEP_URL, "step-3.7-flash", use_multi=True)
+        log.info(f"[Bootstrap] Step responded ({len(frames)} frames)")
     except Exception as e:
         log.warning(f"[Bootstrap] Step failed ({e}), trying Cosmos")
         try:
-            text = _call(COSMOS_URL, "nvidia/cosmos-reason2-8b")
+            text = _call(COSMOS_URL, "nvidia/cosmos-reason2-8b", use_multi=False)
         except Exception as e2:
             log.warning(f"[Bootstrap] Cosmos also failed: {e2}")
             return None
     try:
-
-        # Strip markdown code fences if present
-        text = text.strip().lstrip("```json").lstrip("```").rstrip("```").strip()
-
+        # Extract the last valid JSON block — handles Step's <think>...</think> preamble
+        import re
+        blocks = re.findall(r'\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}', text, re.DOTALL)
+        if not blocks:
+            raise ValueError("no JSON block found")
+        # Take the last block (after any reasoning artifacts)
+        text = blocks[-1]
         data = json.loads(text)
         entities = data.get("entities", {})
         # Flatten list values for readability

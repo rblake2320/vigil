@@ -41,6 +41,7 @@ _event_loop: asyncio.AbstractEventLoop | None = None
 _latest_frame_b64: str = ""
 _latest_stats: dict = {}
 _latest_raw_frame = None  # raw numpy frame for capture mode
+_frame_buffer: list = []   # rolling buffer for multi-frame bootstrap (last ~30 frames)
 _capture_state: dict = {"active": False, "label": "", "until": 0.0, "count": 0}
 
 # Focus ROI: normalized (x1,y1,x2,y2) or None for full frame
@@ -62,8 +63,11 @@ def _push(event: str, data: dict) -> None:
 
 
 def on_frame(frame, detections: list[Detection], ms: float) -> None:
-    global _latest_frame_b64, _latest_stats, _latest_raw_frame
+    global _latest_frame_b64, _latest_stats, _latest_raw_frame, _frame_buffer
     _latest_raw_frame = frame
+    _frame_buffer.append(frame)
+    if len(_frame_buffer) > 30:
+        _frame_buffer.pop(0)
     # Sync ROI into monitor so detect loop can use it
     if _monitor:
         _monitor.focus_roi = _focus_roi
@@ -696,11 +700,13 @@ class ContextSetRequest(BaseModel):
 @app.post("/bootstrap")
 async def bootstrap():
     """Auto-detect scene type, channel, entities from current frame. Sets context."""
-    frame = _latest_raw_frame
-    if frame is None:
+    if _latest_raw_frame is None:
         return {"error": "no frame available"}
+    # Sample 2 frames: oldest in buffer (~3s ago) + latest — Step reasons across the pair
+    buf = _frame_buffer
+    frames = [buf[0], buf[-1]] if len(buf) >= 2 else [_latest_raw_frame]
     def _do():
-        ctx = bootstrap_from_frame(frame)
+        ctx = bootstrap_from_frame(frames)
         if ctx and _monitor:
             _monitor.set_context(ctx)
             _push("context", {"description": ctx.describe(), "type": ctx.type,
