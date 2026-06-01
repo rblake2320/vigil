@@ -1,0 +1,14 @@
+artifact_uri: /home/rblake2320/ai-business/vigil/runs/mlflow/794326446597060751/4197bb3b457f48f0abc877182637e587/artifacts
+end_time: null
+entry_point_name: ''
+experiment_id: '794326446597060751'
+lifecycle_stage: active
+run_id: 4197bb3b457f48f0abc877182637e587
+run_name: v1
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1780239325356
+status: 1
+tags: []
+user_id: rblake2320
