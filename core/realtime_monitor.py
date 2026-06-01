@@ -245,8 +245,9 @@ class FastDetector:
     Runs in ~1ms (TRT) or ~3ms (PyTorch) on GB10.
     """
 
-    TRT_PATH = Path("/tmp/yolo11n.engine")
-    PT_PATH  = Path("/tmp/yolo11n.pt")
+    TRT_PATH       = Path("/tmp/yolo11n.engine")
+    FINE_TUNED_PATH = Path("/home/rblake2320/ai-business/vigil/runs/detect/vigil_training/runs/v1/weights/best.pt")
+    PT_PATH        = Path("/tmp/yolo11n.pt")
 
     def __init__(self, confidence: float = 0.45, classes: list[int] | None = None):
         self.confidence = confidence
@@ -258,6 +259,9 @@ class FastDetector:
         if self.TRT_PATH.exists():
             self._model = YOLO(str(self.TRT_PATH))
             mode = "TensorRT FP16"
+        elif self.FINE_TUNED_PATH.exists():
+            self._model = YOLO(str(self.FINE_TUNED_PATH))
+            mode = "fine-tuned v1 (mAP50=0.871)"
         elif self.PT_PATH.exists():
             self._model = YOLO(str(self.PT_PATH))
             mode = "PyTorch"
