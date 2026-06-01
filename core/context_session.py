@@ -184,7 +184,7 @@ def bootstrap_from_frame(frame, vlm_url: str = STEP_URL) -> Optional[ContextSess
         ]}], "max_tokens": 300, "temperature": 0.1}
         req = urllib.request.Request(url, data=json.dumps(p).encode(),
             headers={"Content-Type": "application/json", "Authorization": "Bearer local"})
-        with urllib.request.urlopen(req, timeout=30) as r:
+        with urllib.request.urlopen(req, timeout=120) as r:
             msg = json.loads(r.read())["choices"][0]["message"]
             return (msg.get("content") or msg.get("reasoning_content") or "").strip()
 

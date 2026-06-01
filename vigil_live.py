@@ -353,7 +353,9 @@ es.addEventListener('context', e => {
 });
 
 async function doBootstrap() {
-  document.getElementById('ctxBar').textContent = 'Bootstrapping...';
+  const bar = document.getElementById('ctxBar');
+  bar.textContent = '⚡ Deep reading scene via Step-3.7-Flash (198B)... 60-90s';
+  bar.style.color = '#ffaa00';
   const r = await fetch('/bootstrap', {method:'POST'});
   const d = await r.json();
 }
