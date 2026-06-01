@@ -34,9 +34,7 @@ from ultralytics import YOLO
 
 log = logging.getLogger(__name__)
 
-STEP_URL       = "http://localhost:8898/v1/chat/completions"  # primary — 2-3s warm, 198B MoE + vision
-COSMOS_URL     = "http://10.0.0.1:8000/v1/chat/completions"  # fallback — Spark1
-OLLAMA_VLM_URL = "http://localhost:11434/v1/chat/completions"  # offline
+COSMOS_URL     = "http://10.0.0.1:8000/v1/chat/completions"  # Spark1 NIM — primary VLM
 ELGATO_DEV  = 0  # /dev/video0 — pass as int, not string (OpenCV V4L2 backend)
 STREAM_URL  = "http://localhost:8891/stream"  # CheatVision MJPEG stream
 
@@ -355,10 +353,9 @@ class CosmosReasoner:
 
     def _call_vlm(self, alert: Alert, memory: 'SceneMemory | None' = None,
                   override_prompt: str | None = None) -> str:
-        _, jpg = cv2.imencode(".jpg", alert.frame, [cv2.IMWRITE_JPEG_QUALITY, 60])
+        _, jpg = cv2.imencode(".jpg", alert.frame, [cv2.IMWRITE_JPEG_QUALITY, 85])
         b64 = base64.b64encode(jpg.tobytes()).decode()
 
-        # Override prompt wins (continuous/context mode)
         if override_prompt:
             prompt = override_prompt
         elif not alert.detections:
@@ -369,44 +366,14 @@ class CosmosReasoner:
             prompt = COSMOS_PROMPT_FIRST.format(
                 detections=", ".join(f"{d.label} ({d.confidence:.0%})" for d in alert.detections)
             )
-        # Primary: Step-3.7-Flash — 2-3s warm, 198B MoE, true vision (warmup fires at startup)
-        try:
-            payload = {
-                "model":    "step-3.7-flash",
-                "messages": [
-                    {"role": "system", "content": "Reply in one sentence only. No preamble."},
-                    {"role": "user", "content": [
-                        {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64}"}},
-                        {"type": "text",      "text":      prompt},
-                    ]},
-                ],
-                "max_tokens":  80,
-                "temperature": 0.2,
-            }
-            data = json.dumps(payload).encode()
-            req  = urllib.request.Request(
-                STEP_URL, data=data,
-                headers={"Content-Type": "application/json", "Authorization": "Bearer local"},
-            )
-            with urllib.request.urlopen(req, timeout=45) as r:
-                msg     = json.loads(r.read())["choices"][0]["message"]
-                content = (msg.get("content") or msg.get("reasoning_content") or "").strip()
-                if content:
-                    log.info(f"[Step] {content[:120]}")
-                    return content
-        except Exception as e:
-            log.warning(f"[Step] Failed ({e}), falling back to Cosmos")
 
-        # Fallback: Cosmos on Spark1
-
-        # Fallback: Cosmos on Spark1
         payload = {
             "model":    "nvidia/cosmos-reason2-8b",
             "messages": [{"role": "user", "content": [
                 {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64}"}},
                 {"type": "text",      "text":      prompt},
             ]}],
-            "max_tokens":  40,
+            "max_tokens":  80,
             "temperature": 0.1,
         }
         data = json.dumps(payload).encode()
