@@ -45,7 +45,9 @@ IFACE        = os.environ.get("WIFI_IFACE", "wlP9s9")
 VIGIL_URL    = os.environ.get("VIGIL_URL",  "http://localhost:8896")
 RSSI_HZ      = 2.0           # polls per second
 HISTORY      = 60            # samples (~30s)
-VAR_THRESH   = 25.0          # RSSI variance threshold for presence (natural jitter ~5-15 on 6GHz)
+VAR_THRESH   = 8.0           # RSSI variance threshold for presence (natural jitter ~2-5 on 6GHz)
+VAR_MOTION_LOW  = 5.0        # variance for low motion
+VAR_MOTION_HIGH = 12.0       # variance for high motion
 EMIT_INTERVAL = 1.0
 
 
@@ -106,9 +108,9 @@ class RSSIPoller:
             rm = sum(r) / len(r)
             recent_var = sum((x - rm) ** 2 for x in r) / len(r)
         presence = var > VAR_THRESH
-        if recent_var > VAR_THRESH * 3:
+        if recent_var > VAR_MOTION_HIGH:
             motion = "high"
-        elif recent_var > VAR_THRESH:
+        elif recent_var > VAR_MOTION_LOW:
             motion = "low"
         else:
             motion = "none"
@@ -127,6 +129,8 @@ class VigilCameraReader:
         self._person_seen = False
         self._last_seen   = 0.0
         self._objects     = set()
+        self._severity    = ""       # last alert severity: HIGH / MEDIUM / LOW
+        self._last_alert  = 0.0
         self._lock        = threading.Lock()
         self._ok          = False
 
@@ -165,6 +169,11 @@ class VigilCameraReader:
         # Alert events have detections with labels
         # Frame events only have count (no labels)
         detections = ev.get("detections", [])
+        severity = ev.get("severity", "")
+        if severity:
+            with self._lock:
+                self._severity   = severity
+                self._last_alert = time.time()
         if detections:
             objects = {d.get("label", d.get("class", "")) for d in detections}
             person = "person" in objects
@@ -172,17 +181,17 @@ class VigilCameraReader:
                 self._objects = objects
                 if person:
                     self._person_seen = True
-                    self._last_seen = time.time()
-        elif "count" in ev and ev["count"] == 0:
-            # Frame with zero detections — decay handled by timer, don't force clear
-            pass
+                    self._last_seen   = time.time()
 
     def state(self) -> dict:
         with self._lock:
+            # Severity decays after 5s — if no new alert, motion = none
+            sev = self._severity if time.time() - self._last_alert < 5.0 else ""
             return {
-                "camera_person": self._person_seen,
-                "camera_objects": list(self._objects),
-                "camera_ok": self._ok,
+                "camera_person":   self._person_seen,
+                "camera_objects":  list(self._objects),
+                "camera_ok":       self._ok,
+                "camera_severity": sev,
             }
 
 
@@ -211,22 +220,28 @@ class FusedSource:
         wifi_presence  = rs["presence"]
         cam_presence   = cam["camera_person"]
         cam_ok         = cam["camera_ok"]
+        cam_severity   = cam.get("camera_severity", "")
+
+        # Motion: camera severity is ground truth, RSSI fills in when camera offline
+        sev_map = {"HIGH": "high", "MEDIUM": "low", "LOW": "low"}
+        if cam_ok and cam_severity:
+            fused_motion = sev_map.get(cam_severity, "none")
+        else:
+            fused_motion = rs["motion"]
 
         # Fusion logic
         if cam_ok:
-            # Camera is authoritative
             fused_presence = cam_presence
             confidence = "high" if cam_presence == wifi_presence else "low"
             contradiction = cam_presence != wifi_presence
         else:
-            # No camera — fall back to WiFi only
             fused_presence = wifi_presence
             confidence = "medium"
             contradiction = False
 
         sig = {
             "wifi_presence":       fused_presence,
-            "wifi_motion":         rs["motion"],
+            "wifi_motion":         fused_motion,
             "wifi_breathing_bpm":  0.0,           # needs CSI hardware
             "wifi_rssi":           rs["rssi"],
             "wifi_variance":       rs["variance"],

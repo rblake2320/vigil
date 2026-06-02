@@ -479,7 +479,8 @@ def _run_fused(iface: str = "wlP9s9", vigil_url: str = "http://localhost:8896"):
         sig = src.signals()
         sig["ts"] = _time.time()
         changed = any(sig.get(k) != last.get(k)
-                      for k in ("wifi_presence", "wifi_motion", "camera_person", "contradiction"))
+                      for k in ("wifi_presence", "wifi_motion", "camera_person",
+                                "camera_severity", "contradiction"))
         if changed:
             _push(sig)
             last = sig.copy()
