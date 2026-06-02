@@ -40,8 +40,8 @@ from watchdog.events import FileSystemEventHandler
 from watchdog.observers import Observer
 
 COSMOS_URL = "http://10.0.0.1:8000/v1/chat/completions"
-COSMOS_MODEL = "cosmos-reason2-8b"
-HASH_THRESHOLD = 8          # perceptual hash distance — lower = more sensitive
+COSMOS_MODEL = "nvidia/cosmos-reason2-8b"
+HASH_THRESHOLD = 5          # perceptual hash distance — lower = more sensitive
 SCREEN_INTERVAL = 1.0       # seconds between screen checks
 WINDOW_INTERVAL = 2.0       # seconds between window/process polls
 VLM_COOLDOWN = 8.0          # minimum seconds between Cosmos calls
@@ -183,9 +183,14 @@ def call_cosmos(img: Image.Image, context: str = "") -> str:
             },
             timeout=15,
         )
-        return resp.json()["choices"][0]["message"]["content"].strip()
+        data = resp.json()
+        if "choices" not in data:
+            import logging; logging.getLogger("perceive").warning("Cosmos bad response: %s", str(data)[:200])
+            return ""
+        return data["choices"][0]["message"]["content"].strip()
     except Exception as e:
-        return f"[cosmos error: {e}]"
+        import logging; logging.getLogger("perceive").warning("Cosmos error: %s", e)
+        return ""
 
 
 # ─── Main Perception Loop ─────────────────────────────────────────────────────
@@ -264,7 +269,10 @@ def run(watch_path: str | None, use_cosmos: bool, use_screen: bool):
             if use_cosmos and gate_open and use_screen:
                 if time.time() - last_vlm_time >= VLM_COOLDOWN:
                     ctx = last_window_state.get("window_title", "")
-                    signals["cosmos"] = call_cosmos(img, ctx)
+                    desc = call_cosmos(img, ctx)
+                    if desc:
+                        signals["cosmos"] = desc
+                        print(f"[cosmos] {desc[:120]}", file=__import__('sys').stderr, flush=True)
                     last_vlm_time = time.time()
 
             # ── Emit ──────────────────────────────────────────────────────

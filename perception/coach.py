@@ -92,6 +92,9 @@ class PerceptionCoach:
     def _speak(self, text: str):
         if not self.tts or not text.strip():
             return
+        # Never speak internal error/status tokens
+        if text.startswith("[") or "cosmos error" in text.lower():
+            return
         now = time.time()
         if now - self._last_spoke < self._speak_cooldown:
             return
@@ -99,9 +102,12 @@ class PerceptionCoach:
         log.info("[TTS] %s", text[:120])
         self.tts.speak(text)
 
-    def _handle_describe(self, obs: str):
+    def _handle_describe(self, obs: str, signals: dict | None = None):
         self.context.add(obs)
-        self._speak(obs)
+        # Only speak when a real VLM description exists — structured text is for context only
+        cosmos = (signals or {}).get("cosmos", "")
+        if cosmos:
+            self._speak(cosmos)
 
     def _handle_coach(self, obs: str, signals: dict):
         if not self.procedure or self.procedure.is_complete:
@@ -164,13 +170,12 @@ class PerceptionCoach:
         log.info("[signals] %s", obs[:140])
 
         if self.describe:
-            self._handle_describe(obs)
+            self._handle_describe(obs, signals)
         elif self.procedure:
             self._handle_coach(obs, signals)
         else:
-            # No procedure — just log and narrate screen changes
-            if signals.get("cosmos") or signals.get("screen_changed"):
-                self._handle_describe(obs)
+            if signals.get("cosmos"):
+                self._handle_describe(obs, signals)
 
     def run_from_stdin(self):
         """Read JSON signal dicts from stdin (piped from spark2_source.py)."""
@@ -209,7 +214,14 @@ class PerceptionCoach:
                          self.procedure.name, step["description"])
                 self._speak(f"Starting procedure: {self.procedure.name}. Step one: {step['description']}")
 
-        proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
+        proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        # Thread to forward stderr (cosmos hits, warnings) to our log
+        def _fwd_stderr():
+            for line in proc.stderr:
+                line = line.strip()
+                if line.startswith("[cosmos]") or line.startswith("[perceive]"):
+                    log.info(line)
+        threading.Thread(target=_fwd_stderr, daemon=True).start()
         buf = ""
         try:
             for line in proc.stdout:
