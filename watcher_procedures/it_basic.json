@@ -1,0 +1,71 @@
+{
+  "name": "IT Onboarding — New User Setup",
+  "description": "Standard procedure for creating a new user account in Active Directory and configuring their workstation.",
+  "version": "1.0",
+  "steps": [
+    {
+      "id": 1,
+      "description": "Open Active Directory Users and Computers (dsa.msc)",
+      "detect": "Active Directory",
+      "required": true,
+      "hint": "Press Win+R, type dsa.msc and hit Enter. Or find it in Administrative Tools.",
+      "timeout_seconds": 60
+    },
+    {
+      "id": 2,
+      "description": "Navigate to the correct Organizational Unit (OU) for the new user",
+      "detect": "Users",
+      "required": true,
+      "hint": "Expand the domain tree in the left pane. Right-click the target OU.",
+      "timeout_seconds": 60
+    },
+    {
+      "id": 3,
+      "description": "Create new user account — right-click OU and select New > User",
+      "detect": "New Object - User",
+      "required": true,
+      "hint": "Right-click the Users OU or target OU, hover New, then click User.",
+      "timeout_seconds": 120
+    },
+    {
+      "id": 4,
+      "description": "Enter first name, last name, and User logon name, then click Next",
+      "detect": "logon name",
+      "required": true,
+      "hint": "Fill in all required fields. The UPN suffix should match the domain.",
+      "timeout_seconds": 120
+    },
+    {
+      "id": 5,
+      "description": "Set the initial password and configure password options",
+      "detect": "password",
+      "required": true,
+      "hint": "For service accounts: check 'Password never expires'. For users: check 'User must change password at next logon'.",
+      "timeout_seconds": 60
+    },
+    {
+      "id": 6,
+      "description": "Review account summary and click Finish to create the account",
+      "detect": "Finish",
+      "required": true,
+      "hint": "Verify the settings are correct before finishing.",
+      "timeout_seconds": 30
+    },
+    {
+      "id": 7,
+      "description": "Add user to appropriate security groups (e.g. Domain Users, VPN-Users)",
+      "detect": "Member Of",
+      "required": false,
+      "hint": "Right-click the new user, Properties, Member Of tab, Add groups.",
+      "timeout_seconds": 120
+    },
+    {
+      "id": 8,
+      "description": "Verify account properties and enable the account if disabled",
+      "detect": "Account is disabled",
+      "required": false,
+      "hint": "Check that the account is enabled (no red X on icon). Verify email, department, phone.",
+      "timeout_seconds": 60
+    }
+  ]
+}

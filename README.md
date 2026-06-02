@@ -153,37 +153,47 @@ VLM reasoning: Cosmos-Reason2-8B (purpose-built for physical world events).
 ## Repository Structure
 
 ```
+watcher.py                        — Continuous screen watcher (software capture, temporal VLM)
+vigil_live.py                     — Real-time YOLO + VLM monitor with browser UI (port 8896)
+
+watcher_procedures/               — JSON procedure files for coach mode
+  it_basic.json                   — IT onboarding: AD user creation (8 steps)
+  fire_watch.json                 — Industrial boiler startup with SCADA (6 steps)
+  README.md                       — Procedure format documentation
+
 core/
-  vigil_demo.py       — Live event detector (fire/fall/person/any)
-  vigil_context.py    — SurroundingAwareness engine (timestamp, 911 script, escalation)
-  auto_evidence.py    — SHA-256 evidence chain, tamper-evident ledger
-  cosmos_verify.py    — Cosmos-Reason2-8B / qwen3-vl VLM reasoning
-  session_report.py   — HTML session report generator
+  vigil_demo.py                   — Live event detector (fire/fall/person/any)
+  vigil_context.py                — SurroundingAwareness engine (timestamp, 911 script, escalation)
+  auto_evidence.py                — SHA-256 evidence chain, tamper-evident ledger
+  cosmos_verify.py                — Cosmos-Reason2-8B / qwen3-vl VLM reasoning
+  realtime_monitor.py             — YOLO11 + VLM two-stage detection loop
+  context_session.py              — Session context + bootstrap from frame
+  session_report.py               — HTML session report generator
 
 alerts/
-  discord_alert.py    — Discord webhook with frame attachments
-  twilio_alert.py     — Voice call + SMS + E911 (TODO: wire in)
+  discord_alert.py                — Discord webhook with frame attachments
+  twilio_alert.py                 — Voice call + SMS + E911 (TODO: wire in)
 
 detectors/
-  fire_detector.py    — Fire/smoke detection (PROVEN)
-  fall_detector.py    — YOLO11 Pose fall detection (designed)
-  intrusion.py        — Person-in-zone detection (designed)
-  pool_safety.py      — Child-in-water detection (designed)
+  fire_detector.py                — Fire/smoke detection (PROVEN)
+  fall_detector.py                — YOLO11 Pose fall detection (designed)
+  intrusion.py                    — Person-in-zone detection (designed)
+  pool_safety.py                  — Child-in-water detection (designed)
 
 cameras/
-  rtsp_source.py      — RTSP stream ingestion
-  elgato_source.py    — HDMI capture via Elgato
-  webcam_source.py    — USB camera
+  rtsp_source.py                  — RTSP stream ingestion
+  elgato_source.py                — HDMI capture via Elgato
+  webcam_source.py                — USB camera
 
 signatures/
-  fps.py              — FPS game cheat signatures (from CheatVision)
-  darkwarsurvival.py  — Dark War Survival RTS signatures
-  sports.py           — Sports officiating call signatures
+  fps.py                          — FPS game cheat signatures (from CheatVision)
+  darkwarsurvival.py              — Dark War Survival RTS signatures
+  sports.py                       — Sports officiating call signatures
 
 docs/
-  PROOF.md            — Documentation of what was proven and when
-  PATENT.md           — Patent #13 claim space
-  ARCHITECTURE.md     — Full system design
+  PROOF.md                        — Documentation of what was proven and when
+  PATENT.md                       — Patent #13 claim space
+  ARCHITECTURE.md                 — Full system design
 ```
 
 ---
@@ -191,10 +201,27 @@ docs/
 ## Quick Start
 
 ```bash
+# --- Continuous screen watcher (new) ---
+# Describe what's on screen continuously
+python watcher.py --mode describe --fps 2
+
+# Coach mode: follow a procedure step by step with TTS guidance
+python watcher.py --mode coach --procedure watcher_procedures/it_basic.json --fps 2
+
+# Monitor mode: silent, log to file, speak only on anomalies
+python watcher.py --mode monitor --log /tmp/vigil_watch.log --fps 1
+
+# Watch a specific screen region only
+python watcher.py --mode describe --region 0,0,1920,1080 --fps 2 --clip-frames 6
+
+# --- Original camera-based detection ---
 # Watch any camera for fire
 python core/vigil_demo.py --source 0              # webcam
 python core/vigil_demo.py --source rtsp://...     # IP camera
 python core/vigil_demo.py --source elgato         # HDMI via Elgato
+
+# Live browser UI (YOLO + VLM two-stage)
+python vigil_live.py --source elgato --port 8896 --conf 0.35
 
 # Configure a camera profile
 from core.vigil_context import CameraProfile, SurroundingAwareness
@@ -211,6 +238,50 @@ awareness.register_camera(CameraProfile(
 
 ---
 
+## Continuous Screen Watcher (watcher.py)
+
+`watcher.py` extends Vigil beyond camera feeds to watch any software screen — no HDMI capture hardware needed. It uses `mss` for zero-dependency software screen capture and sends temporal multi-frame clips to Cosmos-Reason2-8B for deep contextual understanding.
+
+### Architecture
+
+```
+mss software capture (any screen region, configurable FPS)
+        ↓
+  Rolling frame buffer (N seconds)
+        ↓
+  Change detection (grayscale mean-abs-diff, skip static screens)
+        ↓
+  Clip sampler (6 frames evenly sampled over last 3s)
+        ↓
+  Cosmos-Reason2-8B (multi-image API call with rolling 5-description context)
+        ↓
+  Mode handler
+    describe → speak every observation via Piper TTS
+    coach    → compare to procedure step, speak only corrections/advances
+    monitor  → silent watch, speak only on anomalies
+        ↓
+  Piper TTS → paplay → HDMI audio
+```
+
+### Key design decisions
+
+- **Multi-frame temporal clips** — 6 frames sent as separate `image_url` blocks in one API call so Cosmos sees motion over time, not a single snapshot
+- **Rolling description context** — last 5 descriptions injected into each prompt so the model knows what it already saw and focuses on changes
+- **Change detection** — computes mean absolute diff on downsampled grayscale to skip VLM calls when screen is static (saves tokens, reduces latency)
+- **Non-blocking TTS queue** — Piper synthesis and paplay run in a background thread; new observations queue up without blocking the capture loop
+- **Zero extra dependencies** — uses only `mss`, `piper`, `cv2`, `numpy`, `urllib.request` (all already installed)
+
+### Coach mode and Procedure JSON
+
+Coach mode loads a JSON procedure file that describes a multi-step task. The watcher:
+1. Sends each clip to Cosmos with the current step's description and detect keyword
+2. If Cosmos sees screen evidence of completion, advances to the next step and speaks it
+3. If not, speaks a coaching reminder with the step's `hint` text
+
+See `watcher_procedures/README.md` for the full format specification.
+
+---
+
 ## Status
 
 | Component | Status |
@@ -218,13 +289,16 @@ awareness.register_camera(CameraProfile(
 | Fire detection | ✅ PROVEN (2026-05-29) |
 | SHA-256 evidence chain | ✅ Working |
 | AI reasoning (qwen3-vl) | ✅ Active via Ollama |
-| AI reasoning (Cosmos-Reason2-8B) | 🟡 Loading on Spark1 NIM |
+| AI reasoning (Cosmos-Reason2-8B) | ✅ 0.7s on Spark1 NIM :8000 |
 | Surrounding awareness engine | ✅ Built |
 | 911 call script generation | ✅ Built |
+| **Continuous screen watcher** | ✅ Built (watcher.py, 2026-06-02) |
+| **Multi-frame temporal VLM** | ✅ Built (6-frame clips to Cosmos) |
+| **Coach mode + procedure JSON** | ✅ Built (watcher_procedures/) |
+| **Software screen capture (mss)** | ✅ Built (no Elgato hardware needed) |
 | Fall detection | 🔵 Designed, not deployed |
 | Pool safety | 🔵 Designed, not deployed |
 | Twilio voice call | 🔵 Wired, not connected |
-| New repo (this) | ✅ Created 2026-05-29 |
 
 ---
 

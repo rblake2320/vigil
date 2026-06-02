@@ -1,0 +1,55 @@
+{
+  "name": "Fire Watch — Industrial Boiler Startup",
+  "description": "Safety monitoring procedure for boiler startup sequence. Operator must complete each step in order before energizing burners.",
+  "version": "1.0",
+  "steps": [
+    {
+      "id": 1,
+      "description": "Verify SCADA dashboard is open and boiler unit is selected",
+      "detect": "SCADA",
+      "required": true,
+      "hint": "Open the SCADA HMI and select Boiler Unit 1 from the equipment panel.",
+      "timeout_seconds": 60
+    },
+    {
+      "id": 2,
+      "description": "Confirm pre-purge timer is running (300 seconds minimum)",
+      "detect": "purge",
+      "required": true,
+      "hint": "The pre-purge cycle must complete before burner ignition is allowed.",
+      "timeout_seconds": 360
+    },
+    {
+      "id": 3,
+      "description": "Check combustion air damper is at 100% open position",
+      "detect": "damper",
+      "required": true,
+      "hint": "Damper position indicator should read 100% or OPEN before proceeding.",
+      "timeout_seconds": 60
+    },
+    {
+      "id": 4,
+      "description": "Verify gas pressure is within safe operating range (5-15 PSI)",
+      "detect": "pressure",
+      "required": true,
+      "hint": "Gas supply pressure must be within range. If not, stop and call gas company.",
+      "timeout_seconds": 60
+    },
+    {
+      "id": 5,
+      "description": "Initiate pilot ignition sequence",
+      "detect": "ignition",
+      "required": true,
+      "hint": "Click Ignite Pilot on the SCADA panel. Confirm pilot flame indicator lights.",
+      "timeout_seconds": 30
+    },
+    {
+      "id": 6,
+      "description": "Confirm main burner flame established and flame scanner active",
+      "detect": "flame",
+      "required": true,
+      "hint": "Flame scanner LED should turn green. Burner status should show FIRING.",
+      "timeout_seconds": 30
+    }
+  ]
+}
