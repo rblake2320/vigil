@@ -37,6 +37,13 @@ case "${1:-coach}" in
     $PYTHON -u "$DIR/perception/wifi_source.py" --mode rssi --iface "${2:-wlan0}" 2>/dev/null | \
     exec $PYTHON -u "$DIR/perception/coach.py" --describe --stdin "${@:3}"
     ;;
+  wifi-ui)
+    exec $PYTHON -u "$DIR/perception/wifi_ui.py" --mode sim --port "${2:-8897}"
+    ;;
+  wifi-ui-csi)
+    $PYTHON -u "$DIR/perception/wifi_source.py" --mode csi 2>/dev/null | \
+    exec $PYTHON -u "$DIR/perception/wifi_ui.py" --stdin --port "${2:-8897}"
+    ;;
   describe)
     exec $PYTHON -u "$DIR/perception/coach.py" --describe --no-cosmos "${@:2}"
     ;;
