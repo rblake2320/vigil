@@ -400,9 +400,13 @@ async def ws_endpoint(ws: WebSocket):
     _clients.add(ws)
     try:
         await ws.send_json(_latest)
+        # Heartbeat — resend current state every 3s so clients never stay stale
         while True:
-            await asyncio.sleep(30)
+            await asyncio.sleep(3)
+            await ws.send_json(_latest)
     except WebSocketDisconnect:
+        pass
+    except Exception:
         pass
     finally:
         _clients.discard(ws)
@@ -421,7 +425,8 @@ _loop: asyncio.AbstractEventLoop | None = None
 def _push(data: dict):
     _latest.update(data)
     if _loop and not _loop.is_closed():
-        asyncio.run_coroutine_threadsafe(_bcast_queue.put(data), _loop)
+        # call_soon_threadsafe + put_nowait is the correct cross-thread pattern
+        _loop.call_soon_threadsafe(_bcast_queue.put_nowait, dict(data))
 
 @app.on_event("startup")
 async def _startup():
