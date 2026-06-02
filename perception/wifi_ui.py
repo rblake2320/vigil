@@ -223,6 +223,18 @@ HTML = """<!DOCTYPE html>
     </div>
   </div>
 
+  <!-- Heart rate + fall -->
+  <div class="card" id="hr-card">
+    <div class="label">Heart Rate</div>
+    <div class="value" id="hr-value" style="color:#555">—</div>
+    <div class="sub">BPM</div>
+  </div>
+  <div class="card" id="fall-card">
+    <div class="label">Fall Detected</div>
+    <div class="value" id="fall-value" style="color:#555;font-size:2rem">—</div>
+    <div class="sub" id="persons-sub"></div>
+  </div>
+
   <!-- Camera ground truth -->
   <div class="card" id="camera-card" style="grid-column:1/-1;flex-direction:row;justify-content:space-between;padding:16px 24px;">
     <div style="display:flex;flex-direction:column;gap:4px">
@@ -346,6 +358,25 @@ function update(d) {
     b.classList.toggle('lit', i < strength);
   });
 
+  // Heart rate
+  const hr = d.wifi_heartrate_bpm;
+  const hrEl = document.getElementById('hr-value');
+  if (hr) { hrEl.textContent = hr.toFixed(1); hrEl.style.color = '#4ade80'; }
+  else { hrEl.textContent = '—'; hrEl.style.color = '#555'; }
+
+  // Fall + persons
+  const fallEl = document.getElementById('fall-value');
+  const fallCard = document.getElementById('fall-card');
+  if (d.wifi_fall) {
+    fallEl.textContent = '⚠ FALL'; fallEl.style.color = '#ef4444';
+    fallCard.classList.add('warning');
+  } else {
+    fallEl.textContent = 'CLEAR'; fallEl.style.color = '#4ade80';
+    fallCard.classList.remove('warning');
+  }
+  const n = d.wifi_n_persons || 0;
+  document.getElementById('persons-sub').textContent = `${n} person${n===1?'':'s'} detected`;
+
   // Camera ground truth
   const camEl = document.getElementById('camera-text');
   const contrEl = document.getElementById('contradiction-badge');
@@ -468,6 +499,25 @@ def _run_sim():
         time.sleep(1.0)
 
 
+def _run_ruview(rest_url: str = "http://localhost:3000"):
+    sys.path.insert(0, str(Path(__file__).parent))
+    from ruview_source import RuViewRESTSource
+    src = RuViewRESTSource(rest_url).start_threads()
+    import time as _time
+    last: dict = {}
+    print(f"[wifi-ui] RuView source: {rest_url}", flush=True)
+    while True:
+        sig = src.signals()
+        sig["ts"] = _time.time()
+        changed = any(sig.get(k) != last.get(k)
+                      for k in ("wifi_presence", "wifi_motion", "wifi_breathing_bpm",
+                                "wifi_fall", "wifi_n_persons"))
+        if changed:
+            _push(sig)
+            last = sig.copy()
+        _time.sleep(1.0)
+
+
 def _run_fused(iface: str = "wlP9s9", vigil_url: str = "http://localhost:8896"):
     sys.path.insert(0, str(Path(__file__).parent))
     from wifi_source import FusedSource
@@ -489,7 +539,7 @@ def _run_fused(iface: str = "wlP9s9", vigil_url: str = "http://localhost:8896"):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="WiFi sensing UI server")
-    parser.add_argument("--mode",  choices=["sim", "stdin", "fused"], default="fused")
+    parser.add_argument("--mode",  choices=["sim", "stdin", "fused", "ruview"], default="ruview")
     parser.add_argument("--port",  type=int, default=8897)
     parser.add_argument("--host",  default="0.0.0.0")
     parser.add_argument("--iface", default="wlP9s9")
@@ -505,9 +555,12 @@ if __name__ == "__main__":
     elif args.mode == "sim":
         t = threading.Thread(target=_run_sim, daemon=True)
         mode_str = "sim"
-    else:
+    elif args.mode == "fused":
         t = threading.Thread(target=_run_fused, args=(args.iface, args.vigil), daemon=True)
         mode_str = f"fused ({args.iface} + {args.vigil})"
+    else:
+        t = threading.Thread(target=_run_ruview, daemon=True)
+        mode_str = "ruview (Docker sensing-server)"
     t.start()
 
     print(f"[wifi-ui] http://{args.host}:{args.port}")
