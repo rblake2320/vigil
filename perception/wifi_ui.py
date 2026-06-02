@@ -49,6 +49,7 @@ _latest: dict = {
     "wifi_source": "---",
     "ts": 0,
 }
+_bcast_queue: asyncio.Queue = asyncio.Queue()
 
 HTML = """<!DOCTYPE html>
 <html lang="en">
@@ -293,7 +294,9 @@ function update(d) {
   const presCard = document.getElementById('presence-card');
   const icon = document.getElementById('presence-icon');
   const presText = document.getElementById('presence-text');
-  if (d.wifi_presence) {
+  // Camera is ground truth — if camera sees person, show present regardless of RSSI
+  const effectivePresence = (d.camera_ok && d.camera_person) || d.wifi_presence;
+  if (effectivePresence) {
     presCard.classList.add('active'); presCard.classList.remove('warning');
     icon.classList.add('on');
     presText.classList.add('on');
@@ -418,12 +421,18 @@ _loop: asyncio.AbstractEventLoop | None = None
 def _push(data: dict):
     _latest.update(data)
     if _loop and not _loop.is_closed():
-        asyncio.run_coroutine_threadsafe(_broadcast(data), _loop)
+        asyncio.run_coroutine_threadsafe(_bcast_queue.put(data), _loop)
 
 @app.on_event("startup")
-async def _capture_loop():
+async def _startup():
     global _loop
-    _loop = asyncio.get_event_loop()
+    _loop = asyncio.get_running_loop()
+    asyncio.create_task(_drain_queue())
+
+async def _drain_queue():
+    while True:
+        data = await _bcast_queue.get()
+        await _broadcast(data)
 
 # ─── Signal ingestion ─────────────────────────────────────────────────────────
 
@@ -454,22 +463,47 @@ def _run_sim():
         time.sleep(1.0)
 
 
+def _run_fused(iface: str = "wlP9s9", vigil_url: str = "http://localhost:8896"):
+    sys.path.insert(0, str(Path(__file__).parent))
+    from wifi_source import FusedSource
+    src = FusedSource(iface, vigil_url).start_threads()
+    import time as _time
+    last: dict = {}
+    print("[wifi-ui] fused source running", flush=True)
+    while True:
+        sig = src.signals()
+        sig["ts"] = _time.time()
+        changed = any(sig.get(k) != last.get(k)
+                      for k in ("wifi_presence", "wifi_motion", "camera_person", "contradiction"))
+        if changed:
+            _push(sig)
+            last = sig.copy()
+        _time.sleep(1.0)
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="WiFi sensing UI server")
-    parser.add_argument("--mode",  choices=["sim", "stdin"], default="sim")
+    parser.add_argument("--mode",  choices=["sim", "stdin", "fused"], default="fused")
     parser.add_argument("--port",  type=int, default=8897)
     parser.add_argument("--host",  default="0.0.0.0")
+    parser.add_argument("--iface", default="wlP9s9")
+    parser.add_argument("--vigil", default="http://localhost:8896")
     parser.add_argument("--stdin", action="store_true", dest="use_stdin")
     args = parser.parse_args()
 
-    use_stdin = args.use_stdin or args.mode == "stdin" or not sys.stdin.isatty()
+    use_stdin = args.use_stdin or args.mode == "stdin"
 
     if use_stdin:
         t = threading.Thread(target=_read_stdin, daemon=True)
-    else:
+        mode_str = "stdin"
+    elif args.mode == "sim":
         t = threading.Thread(target=_run_sim, daemon=True)
+        mode_str = "sim"
+    else:
+        t = threading.Thread(target=_run_fused, args=(args.iface, args.vigil), daemon=True)
+        mode_str = f"fused ({args.iface} + {args.vigil})"
     t.start()
 
     print(f"[wifi-ui] http://{args.host}:{args.port}")
-    print(f"[wifi-ui] mode: {'stdin' if use_stdin else 'sim'}")
+    print(f"[wifi-ui] mode: {mode_str}")
     uvicorn.run(app, host=args.host, port=args.port, log_level="warning")
