@@ -222,6 +222,15 @@ HTML = """<!DOCTYPE html>
     </div>
   </div>
 
+  <!-- Camera ground truth -->
+  <div class="card" id="camera-card" style="grid-column:1/-1;flex-direction:row;justify-content:space-between;padding:16px 24px;">
+    <div style="display:flex;flex-direction:column;gap:4px">
+      <div class="label">Camera (YOLO)</div>
+      <div id="camera-text" style="font-size:1rem;color:#555">—</div>
+    </div>
+    <div id="contradiction-badge" style="display:none;background:#ef444422;border:1px solid #ef4444;border-radius:8px;padding:8px 14px;font-size:0.75rem;color:#ef4444;max-width:55%;text-align:right;line-height:1.4"></div>
+  </div>
+
   <div id="source-badge">
     <span id="conn-dot"></span>
     <span id="source-text">connecting...</span>
@@ -334,10 +343,31 @@ function update(d) {
     b.classList.toggle('lit', i < strength);
   });
 
+  // Camera ground truth
+  const camEl = document.getElementById('camera-text');
+  const contrEl = document.getElementById('contradiction-badge');
+  if (d.camera_ok === false) {
+    camEl.textContent = 'offline'; camEl.style.color = '#555';
+  } else {
+    const objs = (d.camera_objects || []).join(', ') || 'nothing detected';
+    camEl.textContent = d.camera_person ? `Person detected · ${objs}` : objs;
+    camEl.style.color = d.camera_person ? '#4ade80' : '#888';
+  }
+  if (d.contradiction) {
+    contrEl.style.display = 'block';
+    contrEl.textContent = '⚠ ' + d.contradiction;
+  } else {
+    contrEl.style.display = 'none';
+  }
+
+  // Confidence
+  const confColor = {high:'#4ade80', medium:'#facc15', low:'#ef4444', sim:'#888'};
+
   // Source
   const src = d.wifi_source;
+  const conf = d.wifi_confidence || '';
   document.getElementById('source-text').textContent =
-    `source: ${src} · ${new Date(d.ts * 1000).toLocaleTimeString()}`;
+    `source: ${src} · confidence: ${conf} · ${new Date(d.ts * 1000).toLocaleTimeString()}`;
   document.getElementById('conn-dot').classList.add('live');
 }
 
@@ -383,12 +413,17 @@ async def _broadcast(data: dict):
             dead.add(ws)
     _clients.difference_update(dead)
 
+_loop: asyncio.AbstractEventLoop | None = None
+
 def _push(data: dict):
     _latest.update(data)
-    asyncio.run_coroutine_threadsafe(
-        _broadcast(data),
-        asyncio.get_event_loop(),
-    )
+    if _loop and not _loop.is_closed():
+        asyncio.run_coroutine_threadsafe(_broadcast(data), _loop)
+
+@app.on_event("startup")
+async def _capture_loop():
+    global _loop
+    _loop = asyncio.get_event_loop()
 
 # ─── Signal ingestion ─────────────────────────────────────────────────────────
 
