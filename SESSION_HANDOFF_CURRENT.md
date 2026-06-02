@@ -1,4 +1,4 @@
-# Session Handoff — 2026-06-01 09:56:30
+# Session Handoff — 2026-06-02 01:42:28
 
 > **READ THIS FIRST.** Written by `write_handoff.py`. Captures live system state at time of writing.
 > Next session: run `cat ~/ai-business/SESSION_HANDOFF_CURRENT.md` before doing anything.
@@ -24,7 +24,7 @@
 - YOLO fine-tune on collected training data when weapon samples are ready
 - Patent #12 ($65, patentcenter.uspto.gov) — Vigil passive audio description for blind
 
-## Service Status at 2026-06-01 09:56:30
+## Service Status at 2026-06-02 01:42:28
 
 | Port | Service | Status |
 |---|---|---|
@@ -41,18 +41,18 @@
 ## System Resources
 
 ```
-Mem:           121Gi       109Gi        12Gi       241Mi       6.5Gi        11Gi
+Mem:           121Gi       113Gi       8.0Gi       283Mi       6.8Gi       7.8Gi
 GPU (MB used/free/total): [N/A], [N/A], [N/A]
 ```
 
 **Top Python processes:**
 ```
-263317 1.1 /home/rblake2320/miniconda3/bin/python
+1537781 3.0 /home/rblake2320/miniconda3/bin/python
+263317 1.2 /home/rblake2320/miniconda3/bin/python
 207832 0.6 /home/rblake2320/miniconda3/bin/python
 3461404 0.0 /home/rblake2320/miniconda3/bin/python
 3014184 0.0 /home/rblake2320/miniconda3/bin/python
 1378586 0.0 /usr/bin/python3
-1012296 0.0 /home/rblake2320/miniconda3/bin/python
 ```
 
 ## Start Commands
@@ -102,34 +102,33 @@ Elgato 4K X → YOLO11n (CPU, ~110ms) → ALERT fires immediately
 
 ### vigil (rblake2320/vigil)
 ```
+c05fc87 handoff: full session 2026-06-01
+6b52cfe handoff: session state 2026-06-01
 fde132d Bootstrap: multi-frame Step input, 90% quality, robust JSON extraction
 5d617b9 Bootstrap: raise timeout 30s→120s, honest UI messaging
 ff1ca17 Remove Step-3.7-Flash, fix VLM quality (JPEG 60%→85%, max_tokens 40→80)
-7b0d4a3 Deploy fine-tuned YOLO11n v2 (mAP50=0.871, 50 epochs)
-b426ceb handoff: session state 2026-06-01
 ```
 
 ### behaviorshield-anticheat (rblake2320/behaviorshield-anticheat)
 ```
+619bb97 Add Cronus Zen session labeler for cheat training data
 14e673f Add /dashboard route and fix stream viewport overflow
 015046c Session handoff 2026-05-29b: Cosmos fixed, real-time pipeline built, xdotool unblocked
 053858e Add cosmos_chat: live monitor UI + proxy server for Cosmos-Reason2-8B
 6e1f8f2 SESSION_HANDOFF_2026-05-29: Complete state, both products, all proof
-261d011 Add Vigil Vision-to-Action engine: fire detection PROVEN + context system
 ```
 
 ## Recent Log Tails
 
 ### Vigil (/tmp/vigil_live.log)
 ```
-2026-06-01 08:19:24,527 INFO [VLM] A computer screen displays a terminal window with code and text, alongside a file explorer and other desktop icons.
-2026-06-01 09:50:42,795 INFO [Monitor] Scene changed: frozenset() 
- frozenset({'bus'})
-2026-06-01 09:50:42,796 INFO [ALERT] MEDIUM 
- [{'label': 'bus', 'conf': 0.84}]
-2026-06-01 09:50:44,228 INFO [VLM] A bus is visible in the background of the computer screen.
-2026-06-01 09:50:45,670 INFO [Monitor] Scene cleared 
- was: frozenset({'bus'})
+2026-06-02 01:33:27,720 INFO [VLM] A car is visible in the background, partially obscured by the screen.
+2026-06-02 01:34:00,994 INFO [Monitor] Scene cleared 
+ was: frozenset({'car'})
+2026-06-02 01:34:00,995 INFO [Monitor] No YOLO detections but frame has content (brightness=46) 
+ sending to VLM
+2026-06-02 01:34:00,995 INFO [ALERT] MEDIUM 
+2026-06-02 01:34:02,578 INFO [VLM] Multiple open windows display code and settings on a desktop with a dark theme.
 ```
 
 ## Training Data Collected
@@ -151,4 +150,4 @@ b426ceb handoff: session state 2026-06-01
 - **Step-3.7-Flash:** text-only model, always 500s on vision — keep Cosmos fallback
 
 ---
-*Written by write_handoff.py at 2026-06-01 09:56:30*
+*Written by write_handoff.py at 2026-06-02 01:42:28*
