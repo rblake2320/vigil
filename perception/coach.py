@@ -60,6 +60,15 @@ def signals_to_text(signals: dict) -> str:
     for fe in signals.get("fs_events", []):
         parts.append(f"File {fe.get('event','?')}: {Path(fe.get('path','')).name}")
 
+    if signals.get("wifi_presence") is not None:
+        presence = "person present" if signals["wifi_presence"] else "room empty"
+        motion   = signals.get("wifi_motion", "none")
+        bpm      = signals.get("wifi_breathing_bpm", 0)
+        wifi_str = f"WiFi: {presence}, motion={motion}"
+        if bpm:
+            wifi_str += f", breathing={bpm}bpm"
+        parts.append(wifi_str)
+
     if signals.get("cosmos"):
         parts.append(f"Screen: {signals['cosmos']}")
 
@@ -104,10 +113,19 @@ class PerceptionCoach:
 
     def _handle_describe(self, obs: str, signals: dict | None = None):
         self.context.add(obs)
-        # Only speak when a real VLM description exists — structured text is for context only
-        cosmos = (signals or {}).get("cosmos", "")
-        if cosmos:
-            self._speak(cosmos)
+        s = signals or {}
+        # Speak VLM description when available
+        if s.get("cosmos"):
+            self._speak(s["cosmos"])
+        # Speak WiFi presence changes (person entering/leaving is worth narrating)
+        elif s.get("wifi_presence") is True and not s.get("cosmos"):
+            bpm = s.get("wifi_breathing_bpm", 0)
+            msg = "Person detected in room."
+            if bpm:
+                msg += f" Breathing at {bpm} BPM."
+            self._speak(msg)
+        elif s.get("wifi_presence") is False and not s.get("cosmos"):
+            self._speak("Room is now empty.")
 
     def _handle_coach(self, obs: str, signals: dict):
         if not self.procedure or self.procedure.is_complete:
@@ -174,7 +192,7 @@ class PerceptionCoach:
         elif self.procedure:
             self._handle_coach(obs, signals)
         else:
-            if signals.get("cosmos"):
+            if signals.get("cosmos") or signals.get("wifi_presence") is not None:
                 self._handle_describe(obs, signals)
 
     def run_from_stdin(self):
