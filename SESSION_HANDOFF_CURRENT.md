@@ -1,4 +1,4 @@
-# Session Handoff — 2026-06-03 00:37:34
+# Session Handoff — 2026-06-03 00:44:05
 
 > **READ THIS FIRST.** Written by `write_handoff.py`. Captures live system state at time of writing.
 > Next session: run `cat ~/ai-business/SESSION_HANDOFF_CURRENT.md` before doing anything.
@@ -24,7 +24,7 @@
 - YOLO fine-tune on collected training data when weapon samples are ready
 - Patent #12 ($65, patentcenter.uspto.gov) — Vigil passive audio description for blind
 
-## Service Status at 2026-06-03 00:37:34
+## Service Status at 2026-06-03 00:44:05
 
 | Port | Service | Status |
 |---|---|---|
@@ -41,18 +41,18 @@
 ## System Resources
 
 ```
-Mem:           121Gi       114Gi       7.2Gi       409Mi       8.1Gi       7.5Gi
+Mem:           121Gi       114Gi       7.3Gi       377Mi       7.6Gi       7.4Gi
 GPU (MB used/free/total): [N/A], [N/A], [N/A]
 ```
 
 **Top Python processes:**
 ```
 263317 1.2 /home/rblake2320/miniconda3/bin/python
+2069342 0.7 /home/rblake2320/miniconda3/bin/python3
 2060548 0.7 /home/rblake2320/miniconda3/bin/python
 207832 0.6 /home/rblake2320/miniconda3/bin/python
 1961625 0.0 /usr/bin/python3
 3461404 0.0 /home/rblake2320/miniconda3/bin/python
-1690922 0.0 /home/rblake2320/miniconda3/bin/python
 ```
 
 ## Start Commands
@@ -102,11 +102,11 @@ Elgato 4K X → YOLO11n (CPU, ~110ms) → ALERT fires immediately
 
 ### vigil (rblake2320/vigil)
 ```
+eff6b89 handoff: session state 2026-06-03
 014b0cf perception: Blink camera polling source with YOLO detection
 5378413 perception: RuView Docker sensing-server integration
 70dc7c6 perception: fix motion detection — camera severity as primary source
 296900b wifi_ui: fix cross-thread broadcast, add 3s heartbeat
-0304b01 perception: fix UI presence display and asyncio broadcast
 ```
 
 ### behaviorshield-anticheat (rblake2320/behaviorshield-anticheat)
@@ -122,18 +122,20 @@ Elgato 4K X → YOLO11n (CPU, ~110ms) → ALERT fires immediately
 
 ### Vigil (/tmp/vigil_live.log)
 ```
-2026-06-03 00:37:07,497 INFO [ALERT] MEDIUM 
-2026-06-03 00:37:09,391 INFO [VLM] Amazon webpage open on desktop, showing Echo devices and Alexa+ features with a terminal window visible.
-2026-06-03 00:37:12,531 INFO [Monitor] Scene changed: frozenset() 
+2026-06-03 00:42:10,590 INFO [Monitor] Scene cleared 
+ was: frozenset({'bus'})
+2026-06-03 00:42:14,923 INFO [Monitor] Scene changed: frozenset() 
  frozenset({'car'})
-2026-06-03 00:37:12,531 INFO [ALERT] MEDIUM 
- [{'label': 'car', 'conf': 0.38}]
-2026-06-03 00:37:13,999 INFO [VLM] A car is partially visible in the background, appearing to move.
+2026-06-03 00:42:14,923 INFO [ALERT] MEDIUM 
+ [{'label': 'car', 'conf': 0.4}]
+2026-06-03 00:42:16,053 INFO [Monitor] Scene cleared 
+ was: frozenset({'car'})
+2026-06-03 00:42:16,283 INFO [VLM] Suppressed (no change): A car is visible in the background of the computer screen.
 ```
 
 ## Training Data Collected
 ```
-(unavailable)
+samples: 16872 | classes: ['person', 'tv', 'motorcycle', 'bus', 'car', 'laptop', 'suitcase', 'truck']
 ```
 
 ## Critical Facts (do not forget)
@@ -150,4 +152,4 @@ Elgato 4K X → YOLO11n (CPU, ~110ms) → ALERT fires immediately
 - **Step-3.7-Flash:** text-only model, always 500s on vision — keep Cosmos fallback
 
 ---
-*Written by write_handoff.py at 2026-06-03 00:37:34*
+*Written by write_handoff.py at 2026-06-03 00:44:05*
