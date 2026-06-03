@@ -1,4 +1,4 @@
-# Session Handoff — 2026-06-02 01:42:28
+# Session Handoff — 2026-06-03 00:37:34
 
 > **READ THIS FIRST.** Written by `write_handoff.py`. Captures live system state at time of writing.
 > Next session: run `cat ~/ai-business/SESSION_HANDOFF_CURRENT.md` before doing anything.
@@ -24,7 +24,7 @@
 - YOLO fine-tune on collected training data when weapon samples are ready
 - Patent #12 ($65, patentcenter.uspto.gov) — Vigil passive audio description for blind
 
-## Service Status at 2026-06-02 01:42:28
+## Service Status at 2026-06-03 00:37:34
 
 | Port | Service | Status |
 |---|---|---|
@@ -41,18 +41,18 @@
 ## System Resources
 
 ```
-Mem:           121Gi       113Gi       8.0Gi       283Mi       6.8Gi       7.8Gi
+Mem:           121Gi       114Gi       7.2Gi       409Mi       8.1Gi       7.5Gi
 GPU (MB used/free/total): [N/A], [N/A], [N/A]
 ```
 
 **Top Python processes:**
 ```
-1537781 3.0 /home/rblake2320/miniconda3/bin/python
 263317 1.2 /home/rblake2320/miniconda3/bin/python
+2060548 0.7 /home/rblake2320/miniconda3/bin/python
 207832 0.6 /home/rblake2320/miniconda3/bin/python
+1961625 0.0 /usr/bin/python3
 3461404 0.0 /home/rblake2320/miniconda3/bin/python
-3014184 0.0 /home/rblake2320/miniconda3/bin/python
-1378586 0.0 /usr/bin/python3
+1690922 0.0 /home/rblake2320/miniconda3/bin/python
 ```
 
 ## Start Commands
@@ -102,11 +102,11 @@ Elgato 4K X → YOLO11n (CPU, ~110ms) → ALERT fires immediately
 
 ### vigil (rblake2320/vigil)
 ```
-c05fc87 handoff: full session 2026-06-01
-6b52cfe handoff: session state 2026-06-01
-fde132d Bootstrap: multi-frame Step input, 90% quality, robust JSON extraction
-5d617b9 Bootstrap: raise timeout 30s→120s, honest UI messaging
-ff1ca17 Remove Step-3.7-Flash, fix VLM quality (JPEG 60%→85%, max_tokens 40→80)
+014b0cf perception: Blink camera polling source with YOLO detection
+5378413 perception: RuView Docker sensing-server integration
+70dc7c6 perception: fix motion detection — camera severity as primary source
+296900b wifi_ui: fix cross-thread broadcast, add 3s heartbeat
+0304b01 perception: fix UI presence display and asyncio broadcast
 ```
 
 ### behaviorshield-anticheat (rblake2320/behaviorshield-anticheat)
@@ -122,13 +122,13 @@ ff1ca17 Remove Step-3.7-Flash, fix VLM quality (JPEG 60%→85%, max_tokens 40→
 
 ### Vigil (/tmp/vigil_live.log)
 ```
-2026-06-02 01:33:27,720 INFO [VLM] A car is visible in the background, partially obscured by the screen.
-2026-06-02 01:34:00,994 INFO [Monitor] Scene cleared 
- was: frozenset({'car'})
-2026-06-02 01:34:00,995 INFO [Monitor] No YOLO detections but frame has content (brightness=46) 
- sending to VLM
-2026-06-02 01:34:00,995 INFO [ALERT] MEDIUM 
-2026-06-02 01:34:02,578 INFO [VLM] Multiple open windows display code and settings on a desktop with a dark theme.
+2026-06-03 00:37:07,497 INFO [ALERT] MEDIUM 
+2026-06-03 00:37:09,391 INFO [VLM] Amazon webpage open on desktop, showing Echo devices and Alexa+ features with a terminal window visible.
+2026-06-03 00:37:12,531 INFO [Monitor] Scene changed: frozenset() 
+ frozenset({'car'})
+2026-06-03 00:37:12,531 INFO [ALERT] MEDIUM 
+ [{'label': 'car', 'conf': 0.38}]
+2026-06-03 00:37:13,999 INFO [VLM] A car is partially visible in the background, appearing to move.
 ```
 
 ## Training Data Collected
@@ -150,4 +150,4 @@ ff1ca17 Remove Step-3.7-Flash, fix VLM quality (JPEG 60%→85%, max_tokens 40→
 - **Step-3.7-Flash:** text-only model, always 500s on vision — keep Cosmos fallback
 
 ---
-*Written by write_handoff.py at 2026-06-02 01:42:28*
+*Written by write_handoff.py at 2026-06-03 00:37:34*
