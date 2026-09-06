@@ -5,16 +5,16 @@ Design Beast SDK 1.1.0. PhoneClaw is an upstream reference only; its repository
 is untouched and no source was copied. This lane adds local Android UI and
 screenshot evidence without another assistant, cloud service or script engine.
 
-Install the reviewed sibling SDK in a Vigil virtual environment:
+Install the pinned shared SDK in a Vigil virtual environment:
 
 ```powershell
-python -m pip install "../design-beast-mobile/sdk/python[mobile]"
+python -m pip install -r requirements-mobile.txt
 python -m perception.mobile_watch --serial YOUR_SERIAL --package com.android.settings --output mobile-evidence --duration 30
 python -m perception.mobile_watch --serial YOUR_SERIAL --package com.android.settings --procedure watcher_procedures/android-settings.json --duration 30
 ```
 
-The sibling source path is for these integration worktrees; deployments should
-install the wheel built from the reviewed Beast commit. ADB and an authorized
+The requirements file pins the companion Beast commit and its mobile extra.
+Deployments may instead install the wheel built from that commit. ADB and an authorized
 device must be supplied separately. Open the allowed app yourself. Nothing in
 this observer launches apps, taps, types, calls a model, speaks or publishes.
 
