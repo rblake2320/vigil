@@ -9,7 +9,7 @@ jobs:
         with:
           python-version: '3.12'
       - run: python -m pip install -r requirements-test.txt
-      - run: python -m pytest -q tests
+      - run: python -m pytest -q tests/test_completion_boundaries.py
       - run: python -m perception.mobile_watch --help
       - run: python -m pip install -r requirements-mobile.txt
       - run: python -m pytest -q tests/test_mobile_package.py

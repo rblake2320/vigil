@@ -25,6 +25,10 @@ and the actual observer imported the built SDK from an isolated installation.
 Missing-ADB invocation returned a classified error. Independent reviewer reran nine
 Vigil tests and reported no remaining code blockers after companion fixes.
 
+Follow-up package-consumer regression: ten tests passed with the installed SDK.
+`requirements-mobile.txt` pins Beast commit `9b7b19b1b9e259e0a816f5561e65067911271969`;
+CI installs it and runs the actual Vigil CLI denial test with no skip fallback.
+
 No physical device, camera, speech output, model, emergency action or remote service
 was exercised. Android happy-path and actual desktop end-to-end proof remain absent.
 See `docs/MOBILE-BEAST.md` for owner verification and integration instructions.

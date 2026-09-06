@@ -3,11 +3,9 @@ import json
 import subprocess
 import sys
 
-import pytest
-
-
 def test_installed_sdk_boundary_from_real_vigil_cli():
-    pytest.importorskip("beast_studio_client.mobile")
+    from beast_studio_client import mobile
+    assert mobile.SCHEMA == "beast.android-observation/v1"
     result = subprocess.run([sys.executable, "-m", "perception.mobile_watch",
         "--serial", "test-device", "--package", "com.example.test",
         "--adb", "missing-adb-proof"], capture_output=True, text=True, timeout=10)
