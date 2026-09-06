@@ -1,0 +1,2 @@
+# One reviewed SDK implementation, pinned to the companion commit.
+beast-studio-client[mobile] @ git+https://github.com/rblake2320/design-beast.git@9b7b19b1b9e259e0a816f5561e65067911271969#subdirectory=sdk/python

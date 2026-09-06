@@ -1,6 +1,6 @@
 # Watcher Procedures
 
-Procedure files tell the Vigil watcher what to look for in **coach mode**. The watcher loads the JSON, walks through each step in order, uses the VLM to check whether the current screen shows step completion, and speaks coaching prompts via Piper TTS when the user needs guidance.
+Procedure files tell the Vigil watcher what to look for in **coach mode**. The legacy desktop watcher provides observational hints via Piper TTS; model descriptions no longer advance steps. For Android checkpoints verified against fresh device UI evidence, see [the shared Beast adapter](../docs/MOBILE-BEAST.md).
 
 ---
 
@@ -39,7 +39,7 @@ Procedure files tell the Vigil watcher what to look for in **coach mode**. The w
 |---|---|---|
 | `id` | yes | Step number (integer, used in prompts) |
 | `description` | yes | Spoken to operator as the current goal |
-| `detect` | yes | Keyword(s) that Cosmos must see in the screen description to mark step complete |
+| `detect` | yes | Nonempty keyword used for observational coaching hints; not completion proof |
 | `required` | no | If false, step can be skipped (default: true) |
 | `hint` | no | Additional spoken guidance when step stalls |
 | `timeout_seconds` | no | Not enforced yet — reserved for future timeout logic |
@@ -55,7 +55,7 @@ MATCH: Does the screen show evidence of completing step N?
 Answer YES or NO, then explain briefly.
 ```
 
-If the model says **YES** and the `detect` keyword is found in the description, the step advances automatically.
+Neither YES nor a matching keyword advances the step. Model prose cannot establish completion; the previous substring behavior is contained pending a native desktop postcondition adapter.
 
 If the model says **NO**, the watcher speaks: *"Still on step N: [description]. Look for: [detect]."*
 
@@ -63,13 +63,13 @@ If the model says **NO**, the watcher speaks: *"Still on step N: [description]. 
 
 ## Writing Good `detect` Keywords
 
-The `detect` keyword is matched case-insensitively against the full VLM response text. Choose keywords that are:
+The `detect` keyword provides context for coaching prompts. Choose keywords that are:
 
 - **Specific** — `"New Object - User"` beats `"User"`
 - **Screen-visible** — text that literally appears in a dialog title, button label, or UI element
 - **Unambiguous** — avoid common words that appear in many contexts
 
-For multi-word detection, the entire string must appear as a substring. You can also use a partial match:
+For coaching context, prefer a specific UI label over a broad word:
 - `"Active Directory"` matches `"Active Directory Users and Computers"`
 - `"password"` matches any screen mentioning passwords
 

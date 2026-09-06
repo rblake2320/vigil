@@ -1,0 +1,5 @@
+{
+  "name": "Observe the Android Settings screen",
+  "boundary": "Visible state only; no changes or persistence claim.",
+  "steps": [{"id": "settings-visible", "expected": {"text": "Settings"}}]
+}

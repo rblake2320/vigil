@@ -366,8 +366,17 @@ class Procedure:
         self.path = path
         with open(path) as f:
             data = json.load(f)
+        if not isinstance(data, dict):
+            raise ValueError("procedure must be an object")
         self.name: str = data.get("name", "Untitled Procedure")
         self.steps: list[dict] = data.get("steps", [])
+        if not isinstance(self.steps, list) or not self.steps:
+            raise ValueError("procedure requires nonempty steps")
+        for step in self.steps:
+            if (not isinstance(step, dict) or not isinstance(step.get("detect"), str)
+                    or not step["detect"].strip() or not step.get("description")
+                    or "id" not in step):
+                raise ValueError("each procedure step requires id, description and nonempty detect")
         self.current_step_idx: int = 0
         log.info("[procedure] Loaded '%s' with %d steps", self.name, len(self.steps))
 
@@ -391,15 +400,14 @@ class Procedure:
                      self.current_step["description"])
 
     def check_step_complete(self, description: str) -> bool:
+        """Model prose is an observation, never a completion receipt.
+
+        Kept for compatibility with both watcher and signal-coach callers.
+        Use perception.mobile_watch for device-bound visible-state checks.
+        Desktop descriptions remain useful coaching hints pending a native
+        desktop postcondition adapter; do not silently promote them.
         """
-        Returns True if the current step's detect keyword appears in
-        the VLM description (case-insensitive).
-        """
-        step = self.current_step
-        if step is None:
-            return False
-        detect = step.get("detect", "")
-        return detect.lower() in description.lower()
+        return False
 
 
 # ---------------------------------------------------------------------------
@@ -523,7 +531,7 @@ class Watcher:
         """In coach mode: check procedure progress, speak corrections."""
         if self.procedure is None or self.procedure.is_complete:
             if self.procedure and self.procedure.is_complete:
-                self._speak("Procedure complete. All steps have been verified.")
+                self._speak("Procedure tracking finished.")
             return
 
         step = self.procedure.current_step
