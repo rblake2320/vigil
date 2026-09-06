@@ -175,9 +175,8 @@ class PerceptionCoach:
         proc  = (signals.get("process") or "").lower()
         text  = f"{title} {proc}"
 
-        matched = sum(1 for kw in keywords if kw.lower() in text)
-        if matched >= len(keywords):
-            return True
+        # Window/process keywords identify context, not completion. Keep the
+        # observation for hints until an artifact/native postcondition exists.
         return None
 
     def process(self, signals: dict):

@@ -10,3 +10,5 @@ evidence/
 *.pth
 venv/
 .venv/
+mobile-evidence/
+.pytest_cache/

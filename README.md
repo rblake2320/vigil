@@ -275,8 +275,14 @@ mss software capture (any screen region, configurable FPS)
 
 Coach mode loads a JSON procedure file that describes a multi-step task. The watcher:
 1. Sends each clip to Cosmos with the current step's description and detect keyword
-2. If Cosmos sees screen evidence of completion, advances to the next step and speaks it
-3. If not, speaks a coaching reminder with the step's `hint` text
+2. Treats Cosmos output as observational guidance; prose and title keywords do not advance steps
+3. Keeps the current step pending until an independent completion mechanism exists
+
+Automatic desktop advancement is contained after a reproduced negated-keyword
+false completion. Android visible-state checkpoints are available through the
+[shared Design Beast mobile SDK](docs/MOBILE-BEAST.md), with local evidence and
+explicit device/package identity. Neither lane claims overall task correctness
+from a screen description.
 
 See `watcher_procedures/README.md` for the full format specification.
 
