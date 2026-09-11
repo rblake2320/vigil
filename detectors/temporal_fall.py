@@ -2,7 +2,9 @@
 
 The caller supplies media seconds and stable per-person identities with normalized
 xyxy boxes. Pose/tracker inference and evidence capture belong to the caller.
-Missing/ambiguous observations invalidate continuity, never prove safety.
+Brief missing observations pause horizontal credit; ambiguity resets it.
+Horizontal hold is cumulative observed interval time within a two-second episode,
+not continuous wall time. Missing intervals receive zero credit; no safety claim.
 """
 from dataclasses import dataclass, field
 import math
@@ -23,6 +25,9 @@ class FallCandidate:
     horizontal_at: float
     observed_at: float
     center_drop: float
+    observed_horizontal_seconds: float = 0.0
+    horizontal_span_seconds: float = 0.0
+    hold_policy: str = "observed_intervals_within_2s_v1"
 
 
 @dataclass(frozen=True)
@@ -40,6 +45,9 @@ class _Track:
     baseline_ready: bool = False
     upright_history: deque = field(default_factory=lambda: deque(maxlen=1024))
     horizontal_at: float | None = None
+    horizontal_credit: float = 0.0
+    horizontal_last: float | None = None
+    last_seen: float | None = None
     drop: float = 0.0
     emitted: bool = False
 
@@ -68,15 +76,14 @@ class TemporalFallDetector:
         return FrameResult("insufficient_observation",reasons=(reason,))
 
     def pause_observation(self) -> None:
-        """Retain only established upright history, never credit a missing frame.
+        """Retain established history/episode, never credit a missing interval.
 
         Do not move _last_time: next real sample must still pass max_frame_gap.
-        Unfinished upright evidence and any horizontal hold start are discarded.
+        Unfinished upright evidence is discarded; horizontal interval is interrupted.
         """
         for track in self._tracks.values():
             if not track.baseline_ready:track.upright_since=None
-            track.horizontal_at=None
-            track.drop=0.0
+            track.horizontal_last=None
 
     def update(self, timestamp: float, observations: list[PersonObservation], *,
                frame_valid: bool = True, identity_ambiguous: bool = False,
@@ -108,12 +115,24 @@ class TemporalFallDetector:
         self._last_time=timestamp
         missing=set(self._tracks)-ids
         for track_id in missing:
-            del self._tracks[track_id]
+            track=self._tracks[track_id]
+            if (ids or track.horizontal_at is None or track.last_seen is None
+                    or timestamp-track.last_seen>self.max_frame_gap+1e-9
+                    or timestamp-track.horizontal_at>2.0):
+                del self._tracks[track_id]
+            else:
+                track.horizontal_last=None # missing frame adds zero duration
+                track.upright_since=None
         if not observations:
             return FrameResult("insufficient_observation",reasons=("no_person_observation",))
         candidates=[]
         for person in observations:
             track=self._tracks.setdefault(person.track_id,_Track())
+            if track.last_seen is not None and timestamp-track.last_seen>self.max_frame_gap+1e-9:
+                track=_Track();self._tracks[person.track_id]=track
+            track.last_seen=timestamp
+            if track.horizontal_at is not None and timestamp-track.horizontal_at>2.0:
+                track=_Track(last_seen=timestamp);self._tracks[person.track_id]=track
             while track.upright_history and timestamp-track.upright_history[0][0]>self.rapid_window:
                 track.upright_history.popleft()
             x1,y1,x2,y2=person.box
@@ -135,11 +154,15 @@ class TemporalFallDetector:
                 else:
                     track.upright_history.clear()
                 track.horizontal_at=None
+                track.horizontal_credit=0.0
+                track.horizontal_last=None
                 track.emitted=False
                 continue
             track.upright_since=None
             if width/height<1.2:
                 track.horizontal_at=None
+                track.horizontal_credit=0.0
+                track.horizontal_last=None
                 continue
             if track.horizontal_at is None:
                 if not track.baseline_ready or track.upright_at is None or track.upright_center is None:
@@ -153,8 +176,13 @@ class TemporalFallDetector:
                 track.upright_at=baseline_at
                 track.horizontal_at=timestamp
                 track.drop=drop
-            if not track.emitted and timestamp-track.horizontal_at+1e-9>=self.horizontal_hold:
-                candidates.append(FallCandidate(person.track_id,"possible_fall",track.upright_at,track.horizontal_at,timestamp,track.drop))
+                track.horizontal_credit=0.0
+                track.horizontal_last=None
+            if track.horizontal_last is not None:
+                track.horizontal_credit += timestamp-track.horizontal_last
+            track.horizontal_last=timestamp
+            if not track.emitted and track.horizontal_credit+1e-9>=self.horizontal_hold:
+                candidates.append(FallCandidate(person.track_id,"possible_fall",track.upright_at,track.horizontal_at,timestamp,track.drop,track.horizontal_credit,timestamp-track.horizontal_at))
                 track.emitted=True
         reasons=("track_disappeared_continuity_reset",) if missing else ()
         return FrameResult("possible_fall" if candidates else "insufficient_observation" if missing else "no_candidate_observed",tuple(candidates),reasons)

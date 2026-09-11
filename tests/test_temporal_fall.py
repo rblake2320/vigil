@@ -35,10 +35,14 @@ class TemporalFallTests(unittest.TestCase):
             t=1.5 if not kw else 0.75
             self.assertEqual(d.update(t,[person(DOWN)],**kw).status,"insufficient_observation")
             self.assertFalse(any(d.update(t+(i+1)*0.25,[person(DOWN)]).candidates for i in range(8)))
-    def test_absent_track_cannot_resume_hold(self):
+    def test_brief_absence_resumes_without_crediting_gap(self):
         d=TemporalFallDetector();self.baseline(d);d.update(.75,[person(DOWN)])
         self.assertEqual(d.update(1,[]).status,"insufficient_observation")
-        self.assertFalse(any(d.update(1.25+i*.25,[person(DOWN)]).candidates for i in range(8)))
+        for t in (1.25,1.5,1.75,2):
+            self.assertFalse(d.update(t,[person(DOWN)]).candidates)
+        candidate=d.update(2.25,[person(DOWN)]).candidates[0]
+        self.assertAlmostEqual(candidate.observed_horizontal_seconds,1.0)
+        self.assertAlmostEqual(candidate.horizontal_span_seconds,1.5)
     def test_bad_timestamps_and_boxes_and_ids_refuse(self):
         for value in (math.nan,math.inf,-1,True):
             self.assertEqual(TemporalFallDetector().update(value,[person()]).status,"insufficient_observation")
