@@ -9,6 +9,25 @@ import sqlite3
 import time
 
 
+def validate_single_segment(message):
+    """Conservative GSM-7 ASCII subset; extensions cost two septets.
+
+    Non-ASCII and unsupported controls refuse rather than guessing UCS-2 size.
+    This adapter uses single-part sendTextMessage, never multipart fallback.
+    """
+    if not isinstance(message, str) or not message:
+        raise ValueError("empty SMS")
+    extensions = set("^{}" + chr(92) + "[~]|")
+    total = 0
+    for char in message:
+        if char not in "\r\n" and not (32 <= ord(char) <= 126 and char != "`"):
+            raise ValueError("unsupported SMS encoding")
+        total += 2 if char in extensions else 1
+    if total > 160:
+        raise ValueError("single-segment SMS exceeds 160 septets")
+    return total
+
+
 def dispatch(event, *, journal, alert_store, transport, session_id, consent_path,
              expected_source, expected_destination, now=None):
     from care_notification_engine.delivery import create_and_send_authorized_alert
@@ -32,6 +51,9 @@ def dispatch(event, *, journal, alert_store, transport, session_id, consent_path
     # Wrapper must enforce destination at the actual send boundary.
     if transport.expected_destination != expected_destination:
         raise ValueError("destination binding mismatch")
+    message = ("TRANSPORT TEST ONLY. Reply RECEIVED." if event["origin"] == "transport_test"
+               else "LIVE CAMERA TEST: possible fall, not confirmed. Please check and reply RECEIVED.")
+    validate_single_segment(message) # before journal/INTENT or transport
     canonical = json.dumps({"event":event,"session":session_id,"destination":expected_destination},sort_keys=True,separators=(",",":"))
     digest = hashlib.sha256(canonical.encode()).hexdigest()
     alert_id = "vigil-test-" + hashlib.sha256((session_id+":"+event["event_id"]).encode()).hexdigest()
@@ -45,8 +67,7 @@ def dispatch(event, *, journal, alert_store, transport, session_id, consent_path
         db.execute("INSERT INTO fall_attempt VALUES(1,?,?, 'INTENT')",(digest,alert_id))
         db.commit() # before any transport side effect
         try:
-            label = "TRANSPORT TEST ONLY" if event["origin"] == "transport_test" else "LIVE CAMERA TEST: possible fall candidate, not a confirmed fall"
-            result = create_and_send_authorized_alert(alert_store, transport, message=label+". Please check and reply if received.", session_id=session_id, alert_id=alert_id, consent_state_path=consent_path, now=now)
+            result = create_and_send_authorized_alert(alert_store, transport, message=message, session_id=session_id, alert_id=alert_id, consent_state_path=consent_path, now=now)
             state = "AUTH_DENIED" if not result.authorization.ok else "UNKNOWN"
             if result.transport is not None and result.transport.status in {"accepted","failed","unknown"}:
                 state = result.transport.status.upper()
@@ -68,6 +89,7 @@ class DestinationBoundTransport:
     def send_with_authorization(self, alert_id, message, authorization_receipt):
         from care_notification_engine.contact_directory import resolve_destination
         from care_notification_engine.transport import TransportAcceptance
+        validate_single_segment(message)
         destination = resolve_destination(self.inner._contact_id, directory_path=self.inner._directory_path)
         if destination != self.expected_destination:
             return TransportAcceptance(accepted=False,status="failed",detail="destination_mismatch")

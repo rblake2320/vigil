@@ -65,3 +65,16 @@ def test_actual_destination_guard(tmp_path):
     guard=bridge.DestinationGuardShell(Shell(),"+19194327655")
     raw=base64.b64encode(json.dumps({"destination":"+19999999999"}).encode()).decode()
     with pytest.raises(ValueError): guard.shell("am","broadcast","--es","envelope_b64",raw)
+
+
+@pytest.mark.parametrize("message,count", [("A"*160,160),("["*80,160),("A"*158+"^",160)])
+def test_single_segment_boundary(message,count):
+    assert bridge.validate_single_segment(message)==count
+
+@pytest.mark.parametrize("message", ["A"*161,"["*81,"A"*159+"^","smart \u2019 quote","back`tick", "\t", ""])
+def test_oversize_or_encoding_refuses_before_native(message):
+    class Inner:
+        _shell=object()
+        def send_with_authorization(self,*args): raise AssertionError("native entry")
+    adapter=bridge.DestinationBoundTransport(Inner(),"+19194327655")
+    with pytest.raises(ValueError): adapter.send_with_authorization("id",message,{})
