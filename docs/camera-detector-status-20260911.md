@@ -1,6 +1,10 @@
 # Camera-independent detector work: measured status
 
-This branch is an evaluation build. It does not enable automatic fall, breathing, fire or face-identity alerts on the owner's Blink cameras.
+This branch is an evaluation build. A bounded live Blink/SMS experiment is wired, but the actual controlled-fall trial missed and monitoring is stopped. Breathing, fire and face-identity alerts are not enabled.
+
+## Latest live trial: failed fall alert
+
+The readiness SMS and the owner's inbound START reply succeeded. The activated detector processed the live display but emitted zero fall candidates, so no fall alert was sent. See [the machine-generated trial summary](fall-live-test-20260911.json). The short detection-dropout repair is integrated; its focused state regressions do not establish corrected visual detection. Private frame retention is now available for the next explicitly staged trial so visual evidence can be replayed rather than asking for repeated physical performances.
 
 ## Implemented and executed
 
@@ -23,7 +27,7 @@ Keep camera acquisition separate from temporal detection and from authorized not
 
 1. Evaluate a licensed temporal fall model on staged fall and ordinary-activity recordings; retain misses and nuisance alerts. The current box-transition heuristic is only a candidate baseline.
 2. Establish unattended authenticated Blink clip acquisition or another supported stream. Manual export is not continuous monitoring.
-3. Bind candidate, source freshness and camera identity to the existing check-in approval/delivery path; measure delivery and recovery. This branch sends no phone alert.
+3. Validate the wired candidate-to-SMS path with an actual detected fall and receiver readback. Readiness messaging was exercised; fall-alert invocation did not occur in the failed trial. Preserve the finite window, START gate, single-message size check and no-replay journal.
 4. Evaluate breathing only against an independent reference measurement with applicable recording conditions; no infant safety claim or life-safety substitution.
 5. Face identification requires a separately selected opt-in enrollment and unknown-person testing; no face identity module was added by this branch.
 
