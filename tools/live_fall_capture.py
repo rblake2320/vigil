@@ -216,7 +216,7 @@ def worker(args):
                         write_json(output/'dispatch-intent.json',{'event_id':event['event_id'],'status':'INTENT','automatic_retry':False})
                         command=event_command(args.event_command_json,event_path)
                         try:
-                            result=subprocess.run(command,capture_output=True,timeout=min(10,max(.1,args.deadline_monotonic-time.monotonic()-2)),creationflags=flags)
+                            result=subprocess.run(command,capture_output=True,timeout=min(30,max(.1,args.deadline_monotonic-time.monotonic()-2)),creationflags=flags)
                             # Callback success is not recipient delivery proof.
                             write_json(output/'dispatch-result.json',{'event_id':event['event_id'],'status':'CALLBACK_RETURNED','returncode':result.returncode,'stdout_sha256':hashlib.sha256(result.stdout).hexdigest(),'stderr_sha256':hashlib.sha256(result.stderr).hexdigest(),'recipient_delivery_verified':False})
                         except Exception as error:write_json(output/'dispatch-result.json',{'event_id':event['event_id'],'status':'UNKNOWN','error_type':type(error).__name__,'automatic_retry':False})
