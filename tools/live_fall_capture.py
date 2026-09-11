@@ -19,7 +19,7 @@ import time
 import uuid
 
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
-from detectors.temporal_fall import TemporalFallDetector, PersonObservation
+from detectors.temporal_fall import TemporalFallDetector, PersonObservation, FrameResult
 
 
 def parse_roi(text):
@@ -104,6 +104,16 @@ def event_command(raw,event_path):
     return [v.replace('{event_file}',str(event_path)) for v in command]
 
 
+class ActivationGate:
+    """Owner-controlled local sentinel; never selected from camera/model content."""
+    def __init__(self,path=None):self.path=Path(path) if path else None;self.active=False
+    def sample(self):
+        present=self.path is None or self.path.is_file()
+        activated=present and not self.active
+        self.active=present
+        return present,activated
+
+
 def write_json(path,value):
     if path.exists(): raise FileExistsError(f'Preserve existing artifact: {path}')
     tmp=path.with_name(path.name+'.tmp')
@@ -136,7 +146,7 @@ def worker(args):
     capture_cmd,decode_cmd,w,h=commands(adb,ffmpeg,args.serial,roi,args.seconds)
     model=YOLO(str(weights),task='pose')
     if time.monotonic()>=args.deadline_monotonic-5:raise TimeoutError('No capture budget remains after initialization')
-    detector=TemporalFallDetector();fresh=Freshness();tracker=TargetTracker()
+    detector=TemporalFallDetector();fresh=Freshness();tracker=TargetTracker();activation=ActivationGate(args.activation_file)
     frames=queue.Queue(maxsize=1);problems=queue.Queue();done=threading.Event()
     start=time.monotonic();capture=None;decode=None;events=[];decoded=0;analyzed=0;usable=0;reason='duration_limit'
     trace_path=output/'trace.jsonl'
@@ -165,6 +175,9 @@ def worker(args):
                     if done.is_set():reason='stream_ended';break
                     continue
                 digest=hashlib.sha256(raw).hexdigest();stale=fresh.observe(digest,arrival,time.monotonic())
+                active,just_activated=activation.sample()
+                if just_activated:
+                    detector=TemporalFallDetector();tracker=TargetTracker()
                 if stale=='skip_duplicate_frame':
                     # Display encoder duplicates are not new observations. They
                     # neither advance nor reset the candidate timer; a freeze
@@ -190,8 +203,8 @@ def worker(args):
                 else:tracker.box=None
                 # Inference taking too long is also insufficient current observation.
                 if time.monotonic()-arrival>.5:stale='inference_or_transport_age_exceeded'
-                state=detector.update(arrival-start,people,frame_valid=stale is None,identity_ambiguous=ambiguous,frame_aspect_ratio=w/h)
-                analyzed+=1;usable+=state.status!='insufficient_observation'
+                state=detector.update(arrival-start,people,frame_valid=stale is None,identity_ambiguous=ambiguous,frame_aspect_ratio=w/h) if active else FrameResult('awaiting_activation')
+                analyzed+=1;usable+=state.status not in ('insufficient_observation','awaiting_activation')
                 row={'sequence':seq,'host_decode_arrival_epoch':wall,'host_elapsed_seconds':arrival-start,'timestamp_kind':'host_decode_arrival_NOT_camera_time','frame_sha256':digest,'stale_reason':stale,'boxes_pixels':boxes,'torso_confidences':torso,'tracks':[dataclasses.asdict(p) for p in people],'status':state.status,'reasons':state.reasons}
                 trace.write(json.dumps(row)+'\n');trace.flush()
                 for candidate in state.candidates:
@@ -225,6 +238,7 @@ def main():
     p.add_argument('--worker',action='store_true',help=argparse.SUPPRESS)
     p.add_argument('--deadline-monotonic',type=float,default=0,help=argparse.SUPPRESS)
     p.add_argument('--event-command-json',help='Optional single bounded callback argv; include {event_file}. No retries. Owner supplies adapter.')
+    p.add_argument('--activation-file',help='Optional owner-controlled local file; no candidate/callback while absent. Creation resets upright baseline.')
     args=p.parse_args();parse_roi(args.roi)
     if args.event_command_json:event_command(args.event_command_json,Path('event.json'))
     if args.worker:worker(args);return

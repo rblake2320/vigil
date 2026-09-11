@@ -4,7 +4,7 @@ import unittest
 import sys
 from pathlib import Path
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'tools'))
-from live_fall_capture import parse_roi,commands,read_frame,Freshness,TargetTracker,event_command
+from live_fall_capture import parse_roi,commands,read_frame,Freshness,TargetTracker,event_command,ActivationGate
 
 class LiveCaptureTests(unittest.TestCase):
     def test_roi_and_exact_serial_commands(self):
@@ -60,5 +60,18 @@ class LiveCaptureTests(unittest.TestCase):
         self.assertEqual(event_command('["python", "adapter.py", "--event", "{event_file}"]',Path('receipt.json')),['python','adapter.py','--event','receipt.json'])
         for raw in ('"echo test"','[]','["python","adapter.py"]','["x","{event_file}","{event_file}"]'):
             with self.assertRaises(ValueError):event_command(raw,Path('receipt.json'))
+    def test_activation_absent_then_fresh_baseline_signal(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as directory:
+            path=Path(directory)/'owner-start'
+            gate=ActivationGate(path)
+            self.assertEqual(gate.sample(),(False,False))
+            path.write_text('start',encoding='utf-8')
+            self.assertEqual(gate.sample(),(True,True))
+            self.assertEqual(gate.sample(),(True,False))
+            path.unlink()
+            self.assertEqual(gate.sample(),(False,False))
+            path.write_text('start again',encoding='utf-8')
+            self.assertEqual(gate.sample(),(True,True))
 
 if __name__=='__main__':unittest.main()
