@@ -6,6 +6,7 @@ Missing/ambiguous observations invalidate continuity, never prove safety.
 """
 from dataclasses import dataclass, field
 import math
+from collections import deque
 
 
 @dataclass(frozen=True)
@@ -37,6 +38,7 @@ class _Track:
     upright_at: float | None = None
     upright_center: float | None = None
     baseline_ready: bool = False
+    upright_history: deque = field(default_factory=lambda: deque(maxlen=1024))
     horizontal_at: float | None = None
     drop: float = 0.0
     emitted: bool = False
@@ -112,6 +114,8 @@ class TemporalFallDetector:
         candidates=[]
         for person in observations:
             track=self._tracks.setdefault(person.track_id,_Track())
+            while track.upright_history and timestamp-track.upright_history[0][0]>self.rapid_window:
+                track.upright_history.popleft()
             x1,y1,x2,y2=person.box
             # Box x/y were normalized by different dimensions. Restore the
             # pixel posture ratio before classifying upright/horizontal.
@@ -122,6 +126,14 @@ class TemporalFallDetector:
                 track.baseline_ready=timestamp-track.upright_since+1e-9>=self.upright_hold
                 track.upright_at=timestamp
                 track.upright_center=center
+                # Only samples backed by the established upright hold qualify.
+                # Retain descent history rather than replacing it with the last
+                # already-descended upright frame. Bounded storage may discard
+                # older valid samples at extreme frame rates, never extend time.
+                if track.baseline_ready:
+                    track.upright_history.append((timestamp, center))
+                else:
+                    track.upright_history.clear()
                 track.horizontal_at=None
                 track.emitted=False
                 continue
@@ -132,9 +144,13 @@ class TemporalFallDetector:
             if track.horizontal_at is None:
                 if not track.baseline_ready or track.upright_at is None or track.upright_center is None:
                     continue
-                drop=center-track.upright_center
-                if timestamp-track.upright_at>self.rapid_window or drop<self.min_center_drop:
+                if not track.upright_history:
                     continue
+                baseline_at, baseline_center = track.upright_history[0]
+                drop=center-baseline_center
+                if timestamp-baseline_at>self.rapid_window or drop<self.min_center_drop:
+                    continue
+                track.upright_at=baseline_at
                 track.horizontal_at=timestamp
                 track.drop=drop
             if not track.emitted and timestamp-track.horizontal_at+1e-9>=self.horizontal_hold:
