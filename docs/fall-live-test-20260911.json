@@ -1,0 +1,23 @@
+{
+  "schema": 1,
+  "test": "owner controlled fall observed through Blink Live View on Moto1",
+  "verdict": "FAILED_FALL_ALERT",
+  "ready_sms_status": "accepted",
+  "ready_sms_receipt_sha256": "872e6eb3fc08dc077866733bda52e643008c8c206fd1a20c054347688fc64384",
+  "start_sms_received": true,
+  "start_sms_receipt_sha256": "d6d9b3db5bf26405ab6b15a051542cfab5787561e1fd4aea8da3b15c78ad8d1d",
+  "decoded_frames": 6551,
+  "analyzed_frames": 6498,
+  "fall_candidates": 0,
+  "fall_alert_result_exists": false,
+  "trace_sha256": "6e6d7b0c80e5deddd3dfa8b8550b7df6d68bf5deffd4060a4d70046390a13eda",
+  "floor_posture_screenshot_sha256": "672e69794278e2e91ff184dd5583279829bdfc7d8ecb4695ab188dd1724fa5a3",
+  "capture_terminal_reason": "duration_limit",
+  "limitations": [
+    "Initial ready SMS failed before radio submission because195septets exceeded singlemessage capacity; corrected with length enforcement.",
+    "START is time and sender-number correlated; not cryptographically authenticated.",
+    "No complete video was retained; trace and single floor-posture screenshot cannot replay original image inference.",
+    "No fall alert was produced; not operational fall-detection proof.",
+    "No emergency monitoring or medical readiness claim."
+  ]
+}
