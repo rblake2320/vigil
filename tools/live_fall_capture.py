@@ -57,7 +57,7 @@ def read_frame(stream,size):
 
 class Freshness:
     """Host decoder arrival time is transport evidence, never camera capture time."""
-    def __init__(self): self.last_hash=None;self.last_arrival=None
+    def __init__(self): self.last_hash=None;self.last_arrival=None;self.last_distinct=None
     def observe(self,digest,arrival,now):
         reason=None
         if not all(math.isfinite(v) for v in (arrival,now)) or now<arrival or now-arrival>0.5:
@@ -65,7 +65,11 @@ class Freshness:
         elif self.last_arrival is not None and arrival<=self.last_arrival:
             reason='nonmonotonic_host_arrival'
         elif self.last_hash==digest:
-            reason='identical_display_frame'
+            reason='identical_display_frame' if self.last_distinct is None or arrival-self.last_distinct>=.5 else 'skip_duplicate_frame'
+        else:
+            self.last_distinct=arrival
+        if reason not in (None,'skip_duplicate_frame'):
+            self.last_distinct=None
         self.last_hash=digest;self.last_arrival=arrival
         return reason
 
@@ -161,6 +165,12 @@ def worker(args):
                     if done.is_set():reason='stream_ended';break
                     continue
                 digest=hashlib.sha256(raw).hexdigest();stale=fresh.observe(digest,arrival,time.monotonic())
+                if stale=='skip_duplicate_frame':
+                    # Display encoder duplicates are not new observations. They
+                    # neither advance nor reset the candidate timer; a freeze
+                    # lasting .5s still invalidates continuity below.
+                    trace.write(json.dumps({'sequence':seq,'host_decode_arrival_epoch':wall,'host_elapsed_seconds':arrival-start,'timestamp_kind':'host_decode_arrival_NOT_camera_time','frame_sha256':digest,'status':'duplicate_skipped','stale_reason':stale})+'\n');trace.flush()
+                    continue
                 boxes=[];torso=[];people=[];ambiguous=False
                 if not stale:
                     frame=np.frombuffer(raw,dtype=np.uint8).reshape((h,w,3))

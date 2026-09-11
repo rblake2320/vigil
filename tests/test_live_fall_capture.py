@@ -26,9 +26,29 @@ class LiveCaptureTests(unittest.TestCase):
         with self.assertRaises(ValueError):read_frame(Short(b'12345'),6)
     def test_stale_identical_and_nonmonotonic_refused(self):
         f=Freshness();self.assertIsNone(f.observe('a',1,1.1))
-        self.assertEqual(f.observe('a',1.2,1.3),'identical_display_frame')
+        self.assertEqual(f.observe('a',1.2,1.3),'skip_duplicate_frame')
         self.assertEqual(f.observe('b',1.1,1.2),'nonmonotonic_host_arrival')
         self.assertEqual(f.observe('c',2,3),'stale_or_invalid_host_arrival')
+    def test_intermittent_duplicates_do_not_reset_temporal_continuity(self):
+        from detectors.temporal_fall import TemporalFallDetector,PersonObservation
+        fresh=Freshness();detector=TemporalFallDetector();found=[]
+        for i in range(16):
+            t=i*.125;digest=str(i//2)
+            decision=fresh.observe(digest,t,t)
+            if i%2:self.assertEqual(decision,'skip_duplicate_frame');continue
+            box=(.4,.1,.55,.7) if t<=.5 else (.2,.6,.8,.85)
+            found.extend(detector.update(t,[PersonObservation('a',box)],frame_valid=decision is None).candidates)
+        self.assertEqual(len(found),1)
+    def test_prolonged_freeze_resets_instead_of_preserving_baseline(self):
+        from detectors.temporal_fall import TemporalFallDetector,PersonObservation
+        fresh=Freshness();detector=TemporalFallDetector()
+        for t in (0,.25,.5):
+            self.assertIsNone(fresh.observe(str(t),t,t));detector.update(t,[PersonObservation('a',(.4,.1,.55,.7))])
+        self.assertEqual(fresh.observe('0.5',.75,.75),'skip_duplicate_frame')
+        decision=fresh.observe('0.5',1,1)
+        self.assertEqual(decision,'identical_display_frame')
+        self.assertEqual(detector.update(1,[],frame_valid=False).status,'insufficient_observation')
+        self.assertFalse(any(detector.update(1.25+i*.25,[PersonObservation('a',(.2,.6,.8,.85))]).candidates for i in range(8)))
     def test_target_largest_upright_other_people_and_ambiguity(self):
         t=TargetTracker();standing=(.4,.1,.55,.8);seated=(.05,.5,.25,.7)
         self.assertEqual(t.select([seated,standing],1)[0],1)
