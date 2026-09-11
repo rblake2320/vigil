@@ -115,14 +115,7 @@ class TemporalFallDetector:
         self._last_time=timestamp
         missing=set(self._tracks)-ids
         for track_id in missing:
-            track=self._tracks[track_id]
-            if (ids or track.horizontal_at is None or track.last_seen is None
-                    or timestamp-track.last_seen>self.max_frame_gap+1e-9
-                    or timestamp-track.horizontal_at>2.0):
-                del self._tracks[track_id]
-            else:
-                track.horizontal_last=None # missing frame adds zero duration
-                track.upright_since=None
+            del self._tracks[track_id]
         if not observations:
             return FrameResult("insufficient_observation",reasons=("no_person_observation",))
         candidates=[]

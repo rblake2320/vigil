@@ -9,7 +9,7 @@ def prepared():
  return d
 
 def test_point88_gap_point2_observed_accepts():
- d=prepared();d.update(1.7,[])
+ d=prepared();d.pause_observation()
  assert not d.update(1.8,[h()]).candidates
  candidate=d.update(2,[h()]).candidates[0]
  assert abs(candidate.observed_horizontal_seconds-1.08)<1e-9
@@ -35,10 +35,16 @@ def test_long_gap_resets():
  assert not d.update(2.2,[h()]).candidates
 
 def test_changed_identity_no_inheritance():
- d=prepared();d.update(1.7,[])
+ d=prepared();d.pause_observation()
  assert not d.update(1.8,[h("b")]).candidates
  assert not d.update(2,[h("b")]).candidates
 
 def test_ambiguity_resets():
  d=prepared();d.update(1.7,[h()],identity_ambiguous=True)
  assert not d.update(1.9,[h()]).candidates
+
+
+def test_unidentified_empty_update_clears_episode():
+ d=prepared();d.update(1.7,[])
+ assert not d.update(1.8,[h()]).candidates
+ assert not d.update(2,[h()]).candidates
