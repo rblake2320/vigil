@@ -1,0 +1,23 @@
+{
+  "schema": 1,
+  "status": "no_candidate_observed",
+  "not_a_safety_verdict": true,
+  "source_sha256": "dd87a1980f10f1e3b5f4c96aa7ccf5669e7c357e49053b8d876a9ab6c61a723f",
+  "weights_sha256": "869e83fcdffdc7371fa4e34cd8e51c838cc729571d1635e5141e3075e9319dc0",
+  "decoded_frames": 361,
+  "analyzed_frames": 91,
+  "observed_seconds": 14.97,
+  "partial_clip": true,
+  "processing_seconds": 1.6570000000065193,
+  "dispatch_adapter_enabled": false,
+  "limits": [
+    "single visible person; tracker continuity heuristic",
+    "pose visibility filtered bounding-box transition heuristic unvalidated for real falls",
+    "occlusion/low light/missing torso yields insufficient observation",
+    "no emergency or caregiver dispatch",
+    "external process timeout required for hard deadline"
+  ],
+  "private_trace_sha256": "2b79254c56df76bccc285d1fb53c3be2a1f44484c7276c40249a326ffb457a50",
+  "fall_sensitivity_measured": false,
+  "source": "Actual Blink recording exported by owner-authorized Android UI"
+}
