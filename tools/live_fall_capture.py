@@ -62,8 +62,10 @@ class Freshness:
         reason=None
         if not all(math.isfinite(v) for v in (arrival,now)) or now<arrival or now-arrival>0.5:
             reason='stale_or_invalid_host_arrival'
-        elif self.last_arrival is not None and arrival<=self.last_arrival:
+        elif self.last_arrival is not None and arrival<self.last_arrival:
             reason='nonmonotonic_host_arrival'
+        elif self.last_arrival is not None and arrival==self.last_arrival:
+            return 'skip_equal_arrival_timestamp'
         elif self.last_hash==digest:
             reason='identical_display_frame' if self.last_distinct is None or arrival-self.last_distinct>=.5 else 'skip_duplicate_frame'
         else:
@@ -169,7 +171,7 @@ def worker(args):
     detector=TemporalFallDetector();fresh=Freshness();tracker=TargetTracker();activation=ActivationGate(args.activation_file)
     retention=FrameRetention(output/'private-frames') if args.retain_frames else None
     frames=queue.Queue(maxsize=1);problems=queue.Queue();done=threading.Event()
-    start=time.monotonic();capture=None;decode=None;events=[];decoded=0;analyzed=0;usable=0;reason='duration_limit'
+    capture_start_ns=time.perf_counter_ns();capture=None;decode=None;events=[];decoded=0;analyzed=0;usable=0;reason='duration_limit'
     trace_path=output/'trace.jsonl'
     def pump():
         nonlocal decoded
@@ -177,7 +179,7 @@ def worker(args):
             while not done.is_set():
                 frame=read_frame(decode.stdout,w*h*3)
                 if frame is None:break
-                decoded+=1;item=(decoded,time.monotonic(),time.time(),frame)
+                decoded+=1;item=(decoded,time.perf_counter_ns(),time.time(),frame)
                 try:frames.get_nowait()
                 except queue.Empty:pass
                 frames.put_nowait(item)
@@ -191,19 +193,21 @@ def worker(args):
             capture.stdout.close()
             reader=threading.Thread(target=pump,daemon=True);reader.start()
             while time.monotonic()<args.deadline_monotonic-5:
-                try:seq,arrival,wall,raw=frames.get(timeout=.25)
+                try:seq,arrival_ns,wall,raw=frames.get(timeout=.25)
                 except queue.Empty:
                     if done.is_set():reason='stream_ended';break
                     continue
-                digest=hashlib.sha256(raw).hexdigest();stale=fresh.observe(digest,arrival,time.monotonic())
+                arrival=(arrival_ns-capture_start_ns)/1_000_000_000
+                capture_now=(time.perf_counter_ns()-capture_start_ns)/1_000_000_000
+                digest=hashlib.sha256(raw).hexdigest();stale=fresh.observe(digest,arrival,capture_now)
                 active,just_activated=activation.sample()
                 if just_activated:
                     detector=TemporalFallDetector();tracker=TargetTracker()
-                if stale=='skip_duplicate_frame':
+                if stale in ('skip_duplicate_frame','skip_equal_arrival_timestamp'):
                     # Display encoder duplicates are not new observations. They
                     # neither advance nor reset the candidate timer; a freeze
                     # lasting .5s still invalidates continuity below.
-                    trace.write(json.dumps({'sequence':seq,'host_decode_arrival_epoch':wall,'host_elapsed_seconds':arrival-start,'timestamp_kind':'host_decode_arrival_NOT_camera_time','frame_sha256':digest,'status':'duplicate_skipped','stale_reason':stale})+'\n');trace.flush()
+                    trace.write(json.dumps({'sequence':seq,'host_decode_arrival_epoch':wall,'host_decode_arrival_perf_ns':arrival_ns,'capture_start_perf_ns':capture_start_ns,'host_elapsed_seconds':arrival,'timestamp_kind':'host_decode_arrival_NOT_camera_time','frame_sha256':digest,'status':'duplicate_skipped','stale_reason':stale})+'\n');trace.flush()
                     continue
                 boxes=[];torso=[];all_torso=[];people=[];ambiguous=False;target_reason=None;retained=None
                 if retention is not None and retention.due(arrival):
@@ -229,14 +233,14 @@ def worker(args):
                     else:ambiguous=True
                 else:tracker.box=None
                 # Inference taking too long is also insufficient current observation.
-                if time.monotonic()-arrival>.5:stale='inference_or_transport_age_exceeded'
+                if (time.perf_counter_ns()-arrival_ns)/1_000_000_000>.5:stale='inference_or_transport_age_exceeded'
                 if not active:state=FrameResult('awaiting_activation')
                 elif stale is None and target_reason=='missing_target_brief':
                     detector.pause_observation()
                     state=FrameResult('insufficient_observation',reasons=('brief_missing_target_no_time_credit',))
-                else:state=detector.update(arrival-start,people,frame_valid=stale is None,identity_ambiguous=ambiguous,frame_aspect_ratio=w/h)
+                else:state=detector.update(arrival,people,frame_valid=stale is None,identity_ambiguous=ambiguous,frame_aspect_ratio=w/h)
                 analyzed+=1;usable+=state.status not in ('insufficient_observation','awaiting_activation')
-                row={'sequence':seq,'host_decode_arrival_epoch':wall,'host_elapsed_seconds':arrival-start,'timestamp_kind':'host_decode_arrival_NOT_camera_time','frame_sha256':digest,'retained_frame':retained,'stale_reason':stale,'boxes_pixels':boxes,'torso_confidences':torso,'all_torso_confidences':all_torso,'target_reason':target_reason,'target_epoch':tracker.epoch,'tracks':[dataclasses.asdict(p) for p in people],'status':state.status,'reasons':state.reasons}
+                row={'sequence':seq,'host_decode_arrival_epoch':wall,'host_decode_arrival_perf_ns':arrival_ns,'capture_start_perf_ns':capture_start_ns,'host_elapsed_seconds':arrival,'timestamp_kind':'host_decode_arrival_NOT_camera_time','frame_sha256':digest,'retained_frame':retained,'stale_reason':stale,'boxes_pixels':boxes,'torso_confidences':torso,'all_torso_confidences':all_torso,'target_reason':target_reason,'target_epoch':tracker.epoch,'tracks':[dataclasses.asdict(p) for p in people],'status':state.status,'reasons':state.reasons}
                 trace.write(json.dumps(row)+'\n');trace.flush()
                 for candidate in state.candidates:
                     trace.flush();os.fsync(trace.fileno())
