@@ -76,15 +76,19 @@ class Freshness:
 
 class TargetTracker:
     """Acquire largest unambiguous upright person; never inherit a lost baseline."""
-    def __init__(self):self.box=None;self.epoch=0
-    def select(self,boxes,aspect):
+    def __init__(self):self.box=None;self.epoch=0;self.last_seen=None
+    def select(self,boxes,aspect,timestamp=0.0):
+        if not isinstance(timestamp,(int,float)) or isinstance(timestamp,bool) or not math.isfinite(timestamp) or timestamp<0:
+            self.box=None;self.last_seen=None;return None,'invalid_target_timestamp'
         def area(b):return (b[2]-b[0])*(b[3]-b[1])
         if self.box is None:
             upright=[(i,b) for i,b in enumerate(boxes) if (b[3]-b[1])/((b[2]-b[0])*aspect)>=1.4]
             upright.sort(key=lambda pair:area(pair[1]),reverse=True)
             if not upright:return None,'no_upright_target'
             if len(upright)>1 and area(upright[0][1])<1.25*area(upright[1][1]):return None,'ambiguous_acquisition'
-            index,box=upright[0];self.box=box;self.epoch+=1;return index,None
+            index,box=upright[0];self.box=box;self.epoch+=1;self.last_seen=timestamp;return index,None
+        if self.last_seen is None or timestamp<self.last_seen or timestamp-self.last_seen>.5:
+            self.box=None;self.last_seen=None;return None,'target_observation_gap'
         old=self.box;matches=[]
         for i,b in enumerate(boxes):
             oldcenter=((old[0]+old[2])/2,(old[1]+old[3])/2)
@@ -92,9 +96,10 @@ class TargetTracker:
             intersection=max(0,min(old[2],b[2])-max(old[0],b[0]))*max(0,min(old[3],b[3])-max(old[1],b[1]))
             iou=intersection/(area(old)+area(b)-intersection)
             if .4<=area(b)/area(old)<=2.5 and (iou>=.1 or math.dist(oldcenter,center)<=.35):matches.append(i)
-        if len(matches)!=1:
-            self.box=None;return None,'ambiguous_or_lost_target'
-        index=matches[0];self.box=boxes[index];return index,None
+        if not matches:return None,'missing_target_brief'
+        if len(matches)>1:
+            self.box=None;self.last_seen=None;return None,'ambiguous_target_match'
+        index=matches[0];self.box=boxes[index];self.last_seen=timestamp;return index,None
 
 
 def event_command(raw,event_path):
@@ -112,6 +117,21 @@ class ActivationGate:
         activated=present and not self.active
         self.active=present
         return present,activated
+
+
+class FrameRetention:
+    """Private sampled evidence, <=5Hz and hard cumulative 100MB maximum."""
+    def __init__(self,directory,cap=100_000_000):
+        self.directory=Path(directory);self.directory.mkdir(exist_ok=False)
+        self.last=None;self.bytes=0;self.cap=cap
+    def due(self,timestamp):return self.last is None or timestamp-self.last>=.2-1e-9
+    def save(self,timestamp,sequence,png):
+        if not self.due(timestamp):return None
+        if not png or self.bytes+len(png)>self.cap:raise ValueError('Private frame evidence exceeds hard 100MB cap or is empty')
+        path=self.directory/f'frame-{sequence:07d}.png'
+        with path.open('xb') as f:f.write(png);f.flush();os.fsync(f.fileno())
+        self.bytes+=len(png);self.last=timestamp
+        return {'path':str(path),'png_sha256':hashlib.sha256(png).hexdigest()}
 
 
 def write_json(path,value):
@@ -147,6 +167,7 @@ def worker(args):
     model=YOLO(str(weights),task='pose')
     if time.monotonic()>=args.deadline_monotonic-5:raise TimeoutError('No capture budget remains after initialization')
     detector=TemporalFallDetector();fresh=Freshness();tracker=TargetTracker();activation=ActivationGate(args.activation_file)
+    retention=FrameRetention(output/'private-frames') if args.retain_frames else None
     frames=queue.Queue(maxsize=1);problems=queue.Queue();done=threading.Event()
     start=time.monotonic();capture=None;decode=None;events=[];decoded=0;analyzed=0;usable=0;reason='duration_limit'
     trace_path=output/'trace.jsonl'
@@ -184,7 +205,12 @@ def worker(args):
                     # lasting .5s still invalidates continuity below.
                     trace.write(json.dumps({'sequence':seq,'host_decode_arrival_epoch':wall,'host_elapsed_seconds':arrival-start,'timestamp_kind':'host_decode_arrival_NOT_camera_time','frame_sha256':digest,'status':'duplicate_skipped','stale_reason':stale})+'\n');trace.flush()
                     continue
-                boxes=[];torso=[];people=[];ambiguous=False
+                boxes=[];torso=[];all_torso=[];people=[];ambiguous=False;target_reason=None;retained=None
+                if retention is not None and retention.due(arrival):
+                    evidence_frame=np.frombuffer(raw,dtype=np.uint8).reshape((h,w,3))
+                    encoded,png=cv2.imencode('.png',evidence_frame)
+                    if not encoded:raise ValueError('Private evidence PNG encoding failed')
+                    retained=retention.save(arrival,seq,png.tobytes())
                 if not stale:
                     frame=np.frombuffer(raw,dtype=np.uint8).reshape((h,w,3))
                     result=model.predict(frame,imgsz=320,device='cpu',verbose=False,conf=.4)[0]
@@ -194,18 +220,23 @@ def worker(args):
                         conf=result.keypoints.conf
                         for i,pixel_box in enumerate(boxes):
                             confidence=[float(conf[i,k]) for k in (5,6,11,12)] if conf is not None else []
+                            all_torso.append(confidence)
                             if len(confidence)==4 and all(v>=.35 for v in confidence):
                                 x1,y1,x2,y2=pixel_box;box=(max(0,x1/w),max(0,y1/h),min(1,x2/w),min(1,y2/h))
                                 if box[2]>box[0] and box[3]>box[1]:valid_boxes.append(box);valid_conf.append(confidence)
-                    target,target_reason=tracker.select(valid_boxes,w/h)
+                    target,target_reason=tracker.select(valid_boxes,w/h,arrival)
                     if target is not None:people=[PersonObservation(str(tracker.epoch),valid_boxes[target])];torso=valid_conf[target]
                     else:ambiguous=True
                 else:tracker.box=None
                 # Inference taking too long is also insufficient current observation.
                 if time.monotonic()-arrival>.5:stale='inference_or_transport_age_exceeded'
-                state=detector.update(arrival-start,people,frame_valid=stale is None,identity_ambiguous=ambiguous,frame_aspect_ratio=w/h) if active else FrameResult('awaiting_activation')
+                if not active:state=FrameResult('awaiting_activation')
+                elif stale is None and target_reason=='missing_target_brief':
+                    detector.pause_observation()
+                    state=FrameResult('insufficient_observation',reasons=('brief_missing_target_no_time_credit',))
+                else:state=detector.update(arrival-start,people,frame_valid=stale is None,identity_ambiguous=ambiguous,frame_aspect_ratio=w/h)
                 analyzed+=1;usable+=state.status not in ('insufficient_observation','awaiting_activation')
-                row={'sequence':seq,'host_decode_arrival_epoch':wall,'host_elapsed_seconds':arrival-start,'timestamp_kind':'host_decode_arrival_NOT_camera_time','frame_sha256':digest,'stale_reason':stale,'boxes_pixels':boxes,'torso_confidences':torso,'tracks':[dataclasses.asdict(p) for p in people],'status':state.status,'reasons':state.reasons}
+                row={'sequence':seq,'host_decode_arrival_epoch':wall,'host_elapsed_seconds':arrival-start,'timestamp_kind':'host_decode_arrival_NOT_camera_time','frame_sha256':digest,'retained_frame':retained,'stale_reason':stale,'boxes_pixels':boxes,'torso_confidences':torso,'all_torso_confidences':all_torso,'target_reason':target_reason,'target_epoch':tracker.epoch,'tracks':[dataclasses.asdict(p) for p in people],'status':state.status,'reasons':state.reasons}
                 trace.write(json.dumps(row)+'\n');trace.flush()
                 for candidate in state.candidates:
                     trace.flush();os.fsync(trace.fileno())
@@ -239,6 +270,7 @@ def main():
     p.add_argument('--deadline-monotonic',type=float,default=0,help=argparse.SUPPRESS)
     p.add_argument('--event-command-json',help='Optional single bounded callback argv; include {event_file}. No retries. Owner supplies adapter.')
     p.add_argument('--activation-file',help='Optional owner-controlled local file; no candidate/callback while absent. Creation resets upright baseline.')
+    p.add_argument('--retain-frames',action='store_true',help='Save private cropped PNG evidence at <=5Hz, hard100MB cap. Never put output in public Git.')
     args=p.parse_args();parse_roi(args.roi)
     if args.event_command_json:event_command(args.event_command_json,Path('event.json'))
     if args.worker:worker(args);return

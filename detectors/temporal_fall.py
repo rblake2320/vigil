@@ -65,6 +65,17 @@ class TemporalFallDetector:
         self._last_time=timestamp
         return FrameResult("insufficient_observation",reasons=(reason,))
 
+    def pause_observation(self) -> None:
+        """Retain only established upright history, never credit a missing frame.
+
+        Do not move _last_time: next real sample must still pass max_frame_gap.
+        Unfinished upright evidence and any horizontal hold start are discarded.
+        """
+        for track in self._tracks.values():
+            if not track.baseline_ready:track.upright_since=None
+            track.horizontal_at=None
+            track.drop=0.0
+
     def update(self, timestamp: float, observations: list[PersonObservation], *,
                frame_valid: bool = True, identity_ambiguous: bool = False,
                frame_aspect_ratio: float = 1.0) -> FrameResult:
