@@ -48,7 +48,7 @@ def observe_reply(xml_bytes, sender, expected_body):
     for node in nodes:
         if node.get('package') != PACKAGE or node.get('resource-id') != 'message_text':
             continue
-        if node.get('text') != expected_body or node.get('enabled') != 'true':
+        if node.get('text','').strip(' \t\r\n') != expected_body or node.get('enabled') != 'true':
             continue
         desc = node.get('content-desc', '')
         attribution = re.fullmatch(r'([+()\d -]+) said  (.+)', desc)
@@ -102,18 +102,27 @@ def main():
     parser.add_argument('--nonce',required=True)
     parser.add_argument('--issued-at',required=True,type=float)
     parser.add_argument('--out',required=True,type=Path)
+    parser.add_argument('--wait-seconds',type=int,choices=range(0,121),default=0)
     args=parser.parse_args()
     # No automatic navigation, old XML reuse, or camera interruption: caller
     # opens the authorized thread BEFORE starting the camera test.
-    target='/sdcard/reply-'+uuid.uuid4().hex+'.xml'
     command=[args.adb,'-s',args.serial,'shell']
-    result=subprocess.run(command+['uiautomator','dump',target],capture_output=True,timeout=15)
-    if result.returncode or b'UI hierchary dumped to:' not in result.stdout:
-        raise RuntimeError('Fresh UI dump failed; no old snapshot used')
-    result=subprocess.run(command+['cat',target],capture_output=True,timeout=5)
-    if result.returncode:raise RuntimeError('Fresh UI read failed')
-    xml_bytes=result.stdout
-    receipt=confirm_challenge(xml_bytes,args.sender,args.nonce,args.issued_at)
+    if args.out.exists():raise ValueError('Receipt output already exists; no replay')
+    deadline=time.monotonic()+args.wait_seconds
+    while True:
+        target='/sdcard/reply-'+uuid.uuid4().hex+'.xml'
+        result=subprocess.run(command+['uiautomator','dump',target],capture_output=True,timeout=15)
+        if result.returncode or b'UI hierchary dumped to:' not in result.stdout:
+            raise RuntimeError('Fresh UI dump failed; no old snapshot used')
+        result=subprocess.run(command+['cat',target],capture_output=True,timeout=5)
+        if result.returncode:raise RuntimeError('Fresh UI read failed')
+        xml_bytes=result.stdout
+        try:
+            receipt=confirm_challenge(xml_bytes,args.sender,args.nonce,args.issued_at)
+            break
+        except ValueError as exc:
+            if str(exc)!='Reply absent or ambiguous' or time.monotonic()>=deadline:raise
+            time.sleep(min(3,max(0,deadline-time.monotonic())))
     args.out.mkdir(exist_ok=False)
     snapshot=args.out/'snapshot.xml'
     with snapshot.open('xb') as f:f.write(xml_bytes);f.flush();os.fsync(f.fileno())

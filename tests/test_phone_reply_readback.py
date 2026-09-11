@@ -30,6 +30,9 @@ def test_clock_window_refuses(now):
 def test_legacy_start_is_observation_only():
     assert observe_reply(snapshot(body='START'),SENDER,'START')['observation_only'] is True
 
+def test_mobile_keyboard_trailing_ascii_space():
+    assert confirm_challenge(snapshot(body='START '+NONCE+' '),SENDER,NONCE,100,110)['nonce']==NONCE
+
 def test_saved_snapshot_reverified_and_tamper_refused():
     raw=snapshot();receipt=confirm_challenge(raw,SENDER,NONCE,100,110)
     assert validate_saved(receipt,raw,SENDER,NONCE,111)['nonce']==NONCE

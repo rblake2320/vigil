@@ -20,6 +20,8 @@ import uuid
 
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
 from detectors.temporal_fall import TemporalFallDetector, PersonObservation, FrameResult
+from detectors.pose_descent import PoseDescentDetector, PoseObservation
+from detectors.learned_fall import LearnedFallDetector, HumanPose, PostureBox
 
 
 def parse_roi(text):
@@ -167,8 +169,18 @@ def worker(args):
     if hashlib.sha256(weights.read_bytes()).hexdigest()!=args.weights_sha256:raise ValueError('Weights hash mismatch')
     capture_cmd,decode_cmd,w,h=commands(adb,ffmpeg,args.serial,roi,args.seconds)
     model=YOLO(str(weights),task='pose')
+    learned_mode=args.candidate_mode=='learned-posture'
+    fall_predictor=None;fall_weights_hash=None
+    if learned_mode:
+        from fall_model import make_predictor, EXPECTED_SHA256
+        if not args.fall_weights:raise ValueError('Explicit classifier weights required')
+        fall_predictor=make_predictor(args.fall_weights);fall_weights_hash=EXPECTED_SHA256
     if time.monotonic()>=args.deadline_monotonic-5:raise TimeoutError('No capture budget remains after initialization')
-    detector=TemporalFallDetector();fresh=Freshness();tracker=TargetTracker();activation=ActivationGate(args.activation_file)
+    pose_mode=args.candidate_mode=='pose-descent'
+    def new_detector():return LearnedFallDetector() if learned_mode else PoseDescentDetector() if pose_mode else TemporalFallDetector()
+    detector=new_detector()
+    fresh=Freshness();tracker=TargetTracker();activation=ActivationGate(args.activation_file)
+    last_analysis=None
     retention=FrameRetention(output/'private-frames') if args.retain_frames else None
     frames=queue.Queue(maxsize=1);problems=queue.Queue();done=threading.Event()
     capture_start_ns=time.perf_counter_ns();capture=None;decode=None;events=[];decoded=0;analyzed=0;usable=0;reason='duration_limit'
@@ -202,14 +214,19 @@ def worker(args):
                 digest=hashlib.sha256(raw).hexdigest();stale=fresh.observe(digest,arrival,capture_now)
                 active,just_activated=activation.sample()
                 if just_activated:
-                    detector=TemporalFallDetector();tracker=TargetTracker()
+                    detector=new_detector();tracker=TargetTracker();last_analysis=None
                 if stale in ('skip_duplicate_frame','skip_equal_arrival_timestamp'):
                     # Display encoder duplicates are not new observations. They
                     # neither advance nor reset the candidate timer; a freeze
                     # lasting .5s still invalidates continuity below.
                     trace.write(json.dumps({'sequence':seq,'host_decode_arrival_epoch':wall,'host_decode_arrival_perf_ns':arrival_ns,'capture_start_perf_ns':capture_start_ns,'host_elapsed_seconds':arrival,'timestamp_kind':'host_decode_arrival_NOT_camera_time','frame_sha256':digest,'status':'duplicate_skipped','stale_reason':stale})+'\n');trace.flush()
                     continue
-                boxes=[];torso=[];all_torso=[];people=[];ambiguous=False;target_reason=None;retained=None
+                if (pose_mode or learned_mode) and last_analysis is not None and arrival-last_analysis<.2 and stale is None:
+                    trace.write(json.dumps({'sequence':seq,'host_decode_arrival_epoch':wall,'host_elapsed_seconds':arrival,'frame_sha256':digest,'status':'analysis_sample_skipped','stale_reason':None,'sampling_hz':5})+'\n');trace.flush()
+                    continue
+                last_analysis=arrival
+                boxes=[];torso=[];all_torso=[];all_joints=[];people=[];pose=None;ambiguous=False;target_reason=None;retained=None
+                humans=[];postures=[]
                 if retention is not None and retention.due(arrival):
                     evidence_frame=np.frombuffer(raw,dtype=np.uint8).reshape((h,w,3))
                     encoded,png=cv2.imencode('.png',evidence_frame)
@@ -219,33 +236,50 @@ def worker(args):
                     frame=np.frombuffer(raw,dtype=np.uint8).reshape((h,w,3))
                     result=model.predict(frame,imgsz=320,device='cpu',verbose=False,conf=.4)[0]
                     boxes=result.boxes.xyxy.cpu().tolist() if result.boxes is not None else []
-                    valid_boxes=[];valid_conf=[]
+                    valid_boxes=[];valid_conf=[];valid_joints=[]
                     if boxes and result.keypoints is not None:
                         conf=result.keypoints.conf
+                        all_joints=result.keypoints.xy.cpu().tolist()
                         for i,pixel_box in enumerate(boxes):
                             confidence=[float(conf[i,k]) for k in (5,6,11,12)] if conf is not None else []
                             all_torso.append(confidence)
                             if len(confidence)==4 and all(v>=.35 for v in confidence):
                                 x1,y1,x2,y2=pixel_box;box=(max(0,x1/w),max(0,y1/h),min(1,x2/w),min(1,y2/h))
-                                if box[2]>box[0] and box[3]>box[1]:valid_boxes.append(box);valid_conf.append(confidence)
+                                if box[2]>box[0] and box[3]>box[1]:valid_boxes.append(box);valid_conf.append(confidence);valid_joints.append(all_joints[i])
                     target,target_reason=tracker.select(valid_boxes,w/h,arrival)
-                    if target is not None:people=[PersonObservation(str(tracker.epoch),valid_boxes[target])];torso=valid_conf[target]
+                    humans=[HumanPose(tuple(b),tuple(c)) for b,c in zip(valid_boxes,valid_conf)]
+                    if learned_mode:
+                        classified=fall_predictor(source=frame,stream=False)[0]
+                        for x1,y1,x2,y2,score,cls in classified.boxes.data.cpu().tolist():
+                            b=(max(0,x1/w),max(0,y1/h),min(1,x2/w),min(1,y2/h))
+                            postures.append(PostureBox(b,float(score),classified.names[int(cls)]))
+                    if target is not None:
+                        people=[PersonObservation(str(tracker.epoch),valid_boxes[target])];torso=valid_conf[target]
+                        joints=valid_joints[target]
+                        shoulder=((joints[5][0]+joints[6][0])/(2*w),(joints[5][1]+joints[6][1])/(2*h))
+                        hip=((joints[11][0]+joints[12][0])/(2*w),(joints[11][1]+joints[12][1])/(2*h))
+                        pose=PoseObservation(str(tracker.epoch),shoulder,hip,tuple(torso))
                     else:ambiguous=True
                 else:tracker.box=None
                 # Inference taking too long is also insufficient current observation.
                 if (time.perf_counter_ns()-arrival_ns)/1_000_000_000>.5:stale='inference_or_transport_age_exceeded'
                 if not active:state=FrameResult('awaiting_activation')
+                elif learned_mode:state=detector.update(arrival,humans,postures,frame_valid=stale is None)
+                elif pose_mode:state=detector.update(arrival,pose,frame_valid=stale is None,identity_ambiguous=ambiguous,frame_aspect_ratio=w/h)
                 elif stale is None and target_reason=='missing_target_brief':
                     detector.pause_observation()
                     state=FrameResult('insufficient_observation',reasons=('brief_missing_target_no_time_credit',))
                 else:state=detector.update(arrival,people,frame_valid=stale is None,identity_ambiguous=ambiguous,frame_aspect_ratio=w/h)
                 analyzed+=1;usable+=state.status not in ('insufficient_observation','awaiting_activation')
                 row={'sequence':seq,'host_decode_arrival_epoch':wall,'host_decode_arrival_perf_ns':arrival_ns,'capture_start_perf_ns':capture_start_ns,'host_elapsed_seconds':arrival,'timestamp_kind':'host_decode_arrival_NOT_camera_time','frame_sha256':digest,'retained_frame':retained,'stale_reason':stale,'boxes_pixels':boxes,'torso_confidences':torso,'all_torso_confidences':all_torso,'target_reason':target_reason,'target_epoch':tracker.epoch,'tracks':[dataclasses.asdict(p) for p in people],'status':state.status,'reasons':state.reasons}
+                row.update(candidate_mode=args.candidate_mode,all_keypoints_pixels=all_joints,selected_pose=dataclasses.asdict(pose) if pose else None)
+                if learned_mode:row.update(human_poses=[dataclasses.asdict(p) for p in humans],posture_boxes=[dataclasses.asdict(p) for p in postures],fall_weights_sha256=fall_weights_hash)
                 trace.write(json.dumps(row)+'\n');trace.flush()
                 for candidate in state.candidates:
                     trace.flush();os.fsync(trace.fileno())
                     event={'schema':1,'event_id':str(uuid.uuid4()),'kind':'possible_fall','source':'android_display_roi','requires_human_review':True,'observed_at_epoch':wall,'expires_at_epoch':wall+30,'timestamp_kind':'host_decode_arrival_NOT_camera_time','frame_sha256':digest,'trace_prefix_sha256':hashlib.sha256(trace_path.read_bytes()).hexdigest(),'weights_sha256':args.weights_sha256,'roi':roi,'candidate':dataclasses.asdict(candidate),'callback_configured':bool(args.event_command_json)}
                     event_path=output/f"event-{event['event_id']}.json"
+                    event.update(candidate_mode=args.candidate_mode,fall_weights_sha256=fall_weights_hash)
                     write_json(event_path,event);events.append(event)
                     if args.event_command_json:
                         write_json(output/'dispatch-intent.json',{'event_id':event['event_id'],'status':'INTENT','automatic_retry':False})
@@ -275,7 +309,11 @@ def main():
     p.add_argument('--event-command-json',help='Optional single bounded callback argv; include {event_file}. No retries. Owner supplies adapter.')
     p.add_argument('--activation-file',help='Optional owner-controlled local file; no candidate/callback while absent. Creation resets upright baseline.')
     p.add_argument('--retain-frames',action='store_true',help='Save private cropped PNG evidence at <=5Hz, hard100MB cap. Never put output in public Git.')
+    p.add_argument('--candidate-mode',choices=('box-horizontal','pose-descent','learned-posture'),default='box-horizontal',help='Experimental alternatives use at most 5 inference samples/sec; not medical detection.')
+    p.add_argument('--fall-weights',help='Explicit pinned classifier checkpoint for learned-posture mode')
     args=p.parse_args();parse_roi(args.roi)
+    if args.candidate_mode=='pose-descent' and args.event_command_json:
+        raise ValueError('Pose-descent failed real normal-activity negatives; alert dispatch disabled')
     if args.event_command_json:event_command(args.event_command_json,Path('event.json'))
     if args.worker:worker(args);return
     output=Path(args.out).resolve();output.mkdir(parents=True,exist_ok=False)

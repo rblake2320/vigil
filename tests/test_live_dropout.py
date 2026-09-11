@@ -38,7 +38,10 @@ class BriefDropoutTests(unittest.TestCase):
         d=TemporalFallDetector();up=(.4,.1,.55,.7);down=(.2,.6,.8,.85)
         for t in (0,.25,.5):d.update(t,[PersonObservation('a',up)])
         d.update(.75,[PersonObservation('a',down)]);d.pause_observation()
-        self.assertIsNone(d._tracks['a'].horizontal_at)
+        # The bounded observed-interval policy retains onset, but pauses credit.
+        self.assertEqual(d._tracks['a'].horizontal_at,.75)
+        self.assertEqual(d._tracks['a'].horizontal_credit,0)
+        self.assertIsNone(d._tracks['a'].horizontal_last)
         self.assertFalse(d.update(1.2,[PersonObservation('a',down)]).candidates)
         for t in (1.45,1.7,1.95):self.assertFalse(d.update(t,[PersonObservation('a',down)]).candidates)
         self.assertEqual(len(d.update(2.2,[PersonObservation('a',down)]).candidates),1)
