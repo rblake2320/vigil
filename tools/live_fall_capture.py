@@ -278,6 +278,7 @@ def worker(args):
                 for candidate in state.candidates:
                     trace.flush();os.fsync(trace.fileno())
                     event={'schema':1,'event_id':str(uuid.uuid4()),'kind':'possible_fall','source':'android_display_roi','requires_human_review':True,'observed_at_epoch':wall,'expires_at_epoch':wall+30,'timestamp_kind':'host_decode_arrival_NOT_camera_time','frame_sha256':digest,'trace_prefix_sha256':hashlib.sha256(trace_path.read_bytes()).hexdigest(),'weights_sha256':args.weights_sha256,'roi':roi,'candidate':dataclasses.asdict(candidate),'callback_configured':bool(args.event_command_json)}
+                    event['device_serial']=args.serial
                     event_path=output/f"event-{event['event_id']}.json"
                     event.update(candidate_mode=args.candidate_mode,fall_weights_sha256=fall_weights_hash)
                     write_json(event_path,event);events.append(event)
