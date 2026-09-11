@@ -2,10 +2,15 @@
 
 Same-frame confidence-qualified human pose corroborates a classifier box. A person
 already down can qualify. Identity is only spatial continuity, not authentication.
-Constants are fixed before this validation, not fitted to clips.
+Fixed calibration candidate: three positive of last six observations within
+1.5 seconds, current positive required. This is NOT majority voting. Missing
+human/ambiguous identity resets; class negatives contribute zero. Literature
+motivates temporal posture counts but does not validate our numeric policy:
+https://doi.org/10.1177/1550147717707418
 """
 from dataclasses import dataclass
 import math
+from collections import deque
 
 @dataclass(frozen=True)
 class HumanPose:
@@ -23,10 +28,12 @@ class LearnedCandidate:
     status: str
     started_at: float
     observed_at: float
-    held_seconds: float
+    vote_span_seconds: float
     box: tuple
     score: float
-    policy: str = 'experimental_person_corroborated_posture_v1'
+    positive_votes: int = 3
+    observed_samples: int = 0
+    policy: str = 'experimental_person_corroborated_vote3of6_v2'
 
 @dataclass(frozen=True)
 class LearnedResult:
@@ -42,9 +49,9 @@ def finite(x):return isinstance(x,(float,int)) and not isinstance(x,bool) and ma
 def boxvalid(b):return isinstance(b,(tuple,list)) and len(b)==4 and all(finite(v) and 0<=v<=1 for v in b) and b[2]>b[0] and b[3]>b[1]
 
 class LearnedFallDetector:
-    def __init__(self):self.last=None;self.box=None;self.start=None;self.emitted=False
+    def __init__(self):self.last=None;self.box=None;self.start=None;self.emitted=False;self.votes=deque(maxlen=6)
     def reset(self,why,t=None):
-        self.last=t;self.box=None;self.start=None;self.emitted=False
+        self.last=t;self.box=None;self.start=None;self.emitted=False;self.votes=deque(maxlen=6)
         return LearnedResult('insufficient_observation',reasons=(why,))
     def update(self,timestamp,poses,classifications,*,frame_valid=True,identity_ambiguous=False):
         if not finite(timestamp) or timestamp<0:return self.reset('invalid_timestamp')
@@ -62,18 +69,27 @@ class LearnedFallDetector:
             if len(indexes)>1:return self.reset('ambiguous_human_association',timestamp)
             if indexes:
                 scores=matched[indexes[0]];scores[c.label]=max(scores.get(c.label,0),c.score)
-        fallen=[]
-        for p,scores in zip(humans,matched):
+        # Class disagreement is not human-identity loss. Preserve the selected
+        # physical hypothesis and give every class-negative/uncertain sample zero.
+        positives=[]
+        for i,scores in enumerate(matched):
             ranked=sorted(scores.items(),key=lambda pair:pair[1],reverse=True)
-            if not ranked:continue
-            if len(ranked)>1 and ranked[0][1]-ranked[1][1]<.1-1e-9:return self.reset('ambiguous_posture_class',timestamp)
-            if ranked[0][0]=='fallen':fallen.append((p.box,ranked[0][1]))
-        if len(fallen)!=1:return self.reset('no_unique_fallen_human',timestamp)
-        box,score=fallen[0]
-        if self.box is None or iou(self.box,box)<.3:
-            self.start=timestamp;self.emitted=False
-        self.box=box;self.last=timestamp
-        if not self.emitted and timestamp-self.start>=.4-1e-9:
+            positive=bool(ranked and ranked[0][0]=='fallen' and (len(ranked)==1 or ranked[0][1]-ranked[1][1]>=.1-1e-9))
+            if positive:positives.append(i)
+        if self.box is None:
+            if len(positives)!=1:return self.reset('no_unique_fallen_human',timestamp)
+            selected=positives[0]
+        else:
+            indexes=[i for i,p in enumerate(humans) if iou(self.box,p.box)>=.3]
+            if len(indexes)!=1:return self.reset('missing_or_ambiguous_tracked_human',timestamp)
+            selected=indexes[0]
+        self.box=humans[selected].box;self.last=timestamp
+        positive=selected in positives
+        scores=matched[selected]
+        while self.votes and timestamp-self.votes[0][0]>1.5:self.votes.popleft()
+        self.votes.append((timestamp,positive))
+        votes=[t for t,v in self.votes if v]
+        if positive and len(votes)>=3 and not self.emitted:
             self.emitted=True
-            return LearnedResult('possible_fallen_posture',(LearnedCandidate('possible_fallen_posture',self.start,timestamp,timestamp-self.start,tuple(box),score),))
-        return LearnedResult('no_candidate_observed')
+            return LearnedResult('possible_fallen_posture',(LearnedCandidate('possible_fallen_posture',votes[0],timestamp,timestamp-votes[0],tuple(self.box),scores['fallen'],len(votes),len(self.votes)),))
+        return LearnedResult('no_candidate_observed',reasons=(() if positive else ('class_negative_or_uncertain_zero_vote',)))
